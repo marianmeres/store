@@ -1,6 +1,6 @@
 export interface StoreReadable {
+    subscribe: (cb: Function) => Function;
     get: Function;
-    subscribe: (cb: Function, getImmediate?: boolean) => Function;
     subscribeOnce?: Function;
 }
 export interface StoreLike extends StoreReadable {
@@ -8,7 +8,12 @@ export interface StoreLike extends StoreReadable {
     update: Function;
 }
 export declare const isStoreLike: (v: any) => boolean;
-export declare const createStore: (initial: any, { persist }?: {
-    persist: any;
-}) => StoreLike;
-export declare const createDerivedStore: (stores: StoreLike[], deriveFn: Function) => StoreReadable;
+interface CreateStoreOptions {
+    persist: Function;
+}
+export declare const createStore: (initial?: any, options?: Partial<CreateStoreOptions>) => StoreLike;
+interface CreateDerivedStoreOptions extends CreateStoreOptions {
+    initialValue: any;
+}
+export declare const createDerivedStore: (stores: StoreLike[], deriveFn: (...storesValues: any[]) => any, options?: Partial<CreateDerivedStoreOptions>) => StoreReadable;
+export {};

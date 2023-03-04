@@ -42,7 +42,6 @@ export interface StoreReadable {
 	subscribe: (cb: Function) => Function;
 	// extra helpers (outside of svelte store contract)
 	get: Function;
-	subscribeOnce?: Function;
 }
 
 export interface StoreLike extends StoreReadable {

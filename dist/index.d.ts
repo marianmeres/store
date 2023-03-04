@@ -1,7 +1,6 @@
 export interface StoreReadable {
     subscribe: (cb: Function) => Function;
     get: Function;
-    subscribeOnce?: Function;
 }
 export interface StoreLike extends StoreReadable {
     set: Function;

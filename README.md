@@ -1,6 +1,7 @@
 # @marianmeres/store
 
-Basic store. __Should__ be Svelte store contract compatible.
+Basic store (arbitrary data with the ability to subscribe to changes) utitlity.
+[Svelte store contract](https://svelte.dev/docs#component-format-script-4-prefix-stores-with-$-to-access-their-values-store-contract) compatible.
 
 ## Install
 ```shell

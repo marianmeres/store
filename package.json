@@ -19,7 +19,7 @@
     "prettier": "prettier --write \"{src,tests}/**/*.{js,ts,json}\"",
     "release": "release",
     "test": "test-runner",
-    "test:watch": "nodemon -q -w dist -w tests -x test-runner --",
+    "test:watch": "nodemon -q -w \"src/**/*.*\" -w \"tests/**/*.*\" -x test-runner --",
     "build": "npm run clean && rollup --bundleConfigAsCjs -c",
     "dev": "npm run clean && rollup -c -w"
   },

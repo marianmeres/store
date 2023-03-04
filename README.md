@@ -1,6 +1,6 @@
 # @marianmeres/store
 
-Basic store (arbitrary data with the ability to subscribe to changes) utitlity.
+Basic store (arbitrary data with the ability to subscribe to changes) utility.
 [Svelte store contract](https://svelte.dev/docs#component-format-script-4-prefix-stores-with-$-to-access-their-values-store-contract) compatible.
 
 ## Install

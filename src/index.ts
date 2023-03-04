@@ -153,6 +153,7 @@ export const createDerivedStore = (
 	const _maybeInternalUnsubscribe = () => {
 		if (!--_subsCounter) {
 			_internalUnsubs.forEach((u) => u());
+			_internalUnsubs = [];
 		}
 	};
 

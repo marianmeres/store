@@ -17,12 +17,12 @@ const store = createStore('foo');
 assert('foo' === store.get());
 
 // from now on, console.log changes
-store.subscribe(console.log); // log: foo
+let unsub = store.subscribe(console.log); // log: foo
 
 store.set('bar'); // logs: bar
 store.update((old) => old + 'baz'); // logs: barbaz
 
-unsub(); // cleanup
+unsub(); // stop console.log changes for `store`
 
 // derived example
 const store2 = createStore(123);

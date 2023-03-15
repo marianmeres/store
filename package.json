@@ -1,6 +1,6 @@
 {
   "name": "@marianmeres/store",
-  "version": "0.1.2",
+  "version": "1.0.0",
   "description": "Basic store. Svelte store contract compatible.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -37,8 +37,8 @@
   },
   "homepage": "https://github.com/marianmeres/store#readme",
   "devDependencies": {
-    "@marianmeres/clog": "^0.5.0",
-    "@marianmeres/release": "^0.0.7",
+    "@marianmeres/clog": "^1.0.0",
+    "@marianmeres/release": "^1.0.0",
     "@marianmeres/test-runner": "^2.0.13",
     "@rollup/plugin-commonjs": "^23.0.4",
     "@rollup/plugin-node-resolve": "^15.0.1",

@@ -38,15 +38,19 @@ it does.
 // https://svelte.dev/docs#run-time-svelte-store-writable
 // https://svelte.dev/docs#run-time-svelte-store-derived
 
-export interface StoreReadable {
-	subscribe: (cb: Function) => Function;
-	// extra helpers (outside of svelte store contract)
-	get: Function;
+export declare type Subscribe<T> = (value: T) => void;
+export declare type Unsubscribe = () => void;
+export declare type Update<T> = (value: T) => T;
+
+export interface StoreReadable<T> {
+	subscribe(cb: Subscribe<T>): Unsubscribe;
+	// extra
+	get: () => T;
 }
 
-export interface StoreLike extends StoreReadable {
-	set: Function;
-	update: Function;
+export interface StoreLike<T> extends StoreReadable<T> {
+	set(value: T): void;
+	update(cb: Update<T>): void;
 }
 
 const isFn = (v) => typeof v === 'function';
@@ -62,10 +66,10 @@ interface CreateStoreOptions {
 	persist: Function;
 }
 
-export const createStore = (
+export const createStore = <T>(
 	initial = undefined,
 	options: Partial<CreateStoreOptions> = null
-): StoreLike => {
+): StoreLike<T> => {
 	const _maybePersist = (v) => isFn(options?.persist) && options.persist(v);
 	let _pubsub = createPubSub();
 	let _value = initial;
@@ -113,14 +117,14 @@ interface CreateDerivedStoreOptions extends CreateStoreOptions {
 	initialValue: any;
 }
 
-export const createDerivedStore = (
-	stores: StoreLike[],
+export const createDerivedStore = <T>(
+	stores: StoreLike<any>[],
 	// supporting only subset of svelte api
 	deriveFn: (...storesValues) => any,
 	options: Partial<CreateDerivedStoreOptions> = null
-): StoreReadable => {
+): StoreReadable<T> => {
 	const _maybePersist = (v) => isFn(options?.persist) && options.persist(v);
-	const derived = createStore(options?.initialValue);
+	const derived = createStore<T>(options?.initialValue);
 	const _values = [];
 
 	// save initial values first...

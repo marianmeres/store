@@ -8,6 +8,7 @@ import { createClog } from '@marianmeres/clog';
 
 const clog = createClog(path.basename(fileURLToPath(import.meta.url)));
 const suite = new TestRunner(path.basename(fileURLToPath(import.meta.url)));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // https://svelte.dev/docs#component-format-script-4-prefix-stores-with-$-to-access-their-values-store-contract
 
@@ -135,6 +136,40 @@ suite.test('derived works', () => {
 	assert(derived.get() === 'bat,789');
 	// one new
 	assert(log.join(';') === 'bar,456;baz,456;bat,789');
+});
+
+suite.test('derived async', async () => {
+	let log = [];
+	const store = createStore('a');
+	const store2 = createStore(1);
+
+	const derived = createDerivedStore(
+		[store, store2],
+		([a, b], set) => {
+			setTimeout(() => set([ a, b ].join()), 1);
+		},
+	);
+
+	const unsub = derived.subscribe((v) => log.push(v));
+
+	assert(derived.get() === undefined);
+
+	await sleep(5);
+
+	assert(derived.get() === 'a,1');
+
+	store.set('b');
+
+	assert(derived.get() === 'a,1');
+
+	await sleep(5);
+
+	assert(derived.get() === 'b,1');
+
+	// note that undefined is stringified as null
+	assert(JSON.stringify(log) === '[null,"a,1","b,1"]');
+
+	unsub();
 });
 
 /*

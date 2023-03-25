@@ -17,5 +17,5 @@ export declare const createStore: <T>(initial?: any, options?: Partial<CreateSto
 interface CreateDerivedStoreOptions extends CreateStoreOptions {
     initialValue: any;
 }
-export declare const createDerivedStore: <T>(stores: StoreLike<any>[], deriveFn: (...storesValues: any[]) => any, options?: Partial<CreateDerivedStoreOptions>) => StoreReadable<T>;
+export declare const createDerivedStore: <T>(stores: StoreLike<any>[], deriveFn: (storesValues: any[], set?: Function) => any, options?: Partial<CreateDerivedStoreOptions>) => StoreReadable<T>;
 export {};

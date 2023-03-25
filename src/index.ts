@@ -120,7 +120,7 @@ interface CreateDerivedStoreOptions extends CreateStoreOptions {
 export const createDerivedStore = <T>(
 	stores: StoreLike<any>[],
 	// supporting only subset of svelte api
-	deriveFn: (...storesValues) => any,
+	deriveFn: (storesValues: any[], set?: Function) => any,
 	options: Partial<CreateDerivedStoreOptions> = null
 ): StoreReadable<T> => {
 	const _maybePersist = (v) => isFn(options?.persist) && options.persist(v);
@@ -132,6 +132,16 @@ export const createDerivedStore = <T>(
 		if (!isStoreLike(s)) throw new TypeError('Expecting array of StoreLike objects');
 		_values.push(s.get());
 	});
+
+	if (!isFn(deriveFn)) {
+		throw new TypeError('Expecting second argument to be the derivative function');
+	}
+
+	if (!deriveFn.length || deriveFn.length > 2) {
+		throw new TypeError(
+			'Expecting the derivative function to have exactly 1 or 2 arguments'
+		);
+	}
 
 	//
 	let _subsCounter = 0;
@@ -145,8 +155,15 @@ export const createDerivedStore = <T>(
 				_internalUnsubs.push(
 					s.subscribe((value) => {
 						_values[idx] = value;
-						derived.set(deriveFn(_values));
-						_maybePersist(derived.get());
+						if (deriveFn.length === 1) {
+							derived.set(deriveFn(_values));
+							_maybePersist(derived.get());
+						} else {
+							deriveFn(_values, (v) => {
+								derived.set(v);
+								_maybePersist(derived.get());
+							});
+						}
 					})
 				);
 			});

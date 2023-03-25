@@ -37,4 +37,9 @@ store2.set(456); // logs: barbaz,456
 
 unsub();
 store.set(789); // no log
+
+// derived async example (the deriveFn accepts second 'set' argument)
+const derivedAsync = createDerivedStore([store, store2], ([a, b], set) => {
+    setTimeout(() => { set([a, b].join()) }, 1000)
+});
 ```

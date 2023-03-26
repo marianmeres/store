@@ -130,7 +130,9 @@ export const createDerivedStore = <T>(
 	// save initial values first...
 	stores.forEach((s) => {
 		if (!isStoreLike(s)) throw new TypeError('Expecting array of StoreLike objects');
-		_values.push(s.get());
+		// sub & immediately unsub (we could use _values.push(s.get()) but that wouldn't
+		// be native Svelte store compatible)
+		s.subscribe((v) => _values.push(v))();
 	});
 
 	if (!isFn(deriveFn)) {

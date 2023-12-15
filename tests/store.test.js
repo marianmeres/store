@@ -74,6 +74,12 @@ suite.test('store update works', () => {
 	assert('foobar' === store.get());
 });
 
+suite.test('store set undefined', () => {
+	const store = createStore('foo');
+	store.set(undefined);
+	assert(undefined === store.get());
+});
+
 suite.test('derived works', () => {
 	const call_log = [];
 	const initialValue = 'hey';
@@ -138,17 +144,32 @@ suite.test('derived works', () => {
 	assert(log.join(';') === 'bar,456;baz,456;bat,789');
 });
 
+suite.test('derived undefined input', () => {
+	let log = [];
+	let call_log = [];
+	const store = createStore('foo');
+	const derived = createDerivedStore([store], ([a]) => {
+		call_log.push(`[${a}]`);
+		return a;
+	});
+
+	// now subscribe
+	const unsub = derived.subscribe((v) => log.push(v));
+
+	//
+	store.set(undefined);
+	assert(derived.get() === undefined);
+	assert(call_log.join(';') === '[foo];[undefined]');
+});
+
 suite.test('derived async', async () => {
 	let log = [];
 	const store = createStore('a');
 	const store2 = createStore(1);
 
-	const derived = createDerivedStore(
-		[store, store2],
-		([a, b], set) => {
-			setTimeout(() => set([ a, b ].join()), 1);
-		},
-	);
+	const derived = createDerivedStore([store, store2], ([a, b], set) => {
+		setTimeout(() => set([a, b].join()), 1);
+	});
 
 	const unsub = derived.subscribe((v) => log.push(v));
 

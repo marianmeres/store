@@ -66,6 +66,25 @@ export interface CreateStoreOptions<T> {
 	persist?: (v: T) => void;
 }
 
+declare const window: any;
+
+// quick-n-dirty helper to play nicely along
+export const createStoragePersistor = <T>(
+	key: string,
+	type: 'session' | 'local' = 'session'
+): { persist: (v: T) => void; get: () => T } => {
+	const storage = type === 'session' ? window?.sessionStorage : window?.localStorage;
+	// prettier-ignore
+	return {
+		persist: (v: T) => {
+			try { storage?.setItem(key, JSON.stringify(v)) } catch (e) { console.error(e) }
+		},
+		get: () => {
+			try { return JSON.parse(storage?.getItem(key)) } catch (e) {}
+		},
+	};
+};
+
 export const createStore = <T>(
 	initial?: T,
 	options: CreateStoreOptions<T> | null = null

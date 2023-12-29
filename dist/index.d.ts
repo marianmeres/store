@@ -13,6 +13,10 @@ export declare const isStoreLike: (v: any) => boolean;
 export interface CreateStoreOptions<T> {
     persist?: (v: T) => void;
 }
+export declare const createStoragePersistor: <T>(key: string, type?: 'session' | 'local') => {
+    persist: (v: T) => void;
+    get: () => T;
+};
 export declare const createStore: <T>(initial?: T | undefined, options?: CreateStoreOptions<T> | null) => StoreLike<T>;
 interface CreateDerivedStoreOptions<T> extends CreateStoreOptions<T> {
     initialValue?: any;

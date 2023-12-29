@@ -10,12 +10,12 @@ export interface StoreLike<T> extends StoreReadable<T> {
     update(cb: Update<T>): void;
 }
 export declare const isStoreLike: (v: any) => boolean;
-export interface CreateStoreOptions {
-    persist: (v: any) => void;
+export interface CreateStoreOptions<T> {
+    persist?: (v: T) => void;
 }
-export declare const createStore: <T>(initial?: any, options?: Partial<CreateStoreOptions>) => StoreLike<T>;
-interface CreateDerivedStoreOptions extends CreateStoreOptions {
-    initialValue: any;
+export declare const createStore: <T>(initial?: T | undefined, options?: CreateStoreOptions<T> | null) => StoreLike<T>;
+interface CreateDerivedStoreOptions<T> extends CreateStoreOptions<T> {
+    initialValue?: any;
 }
-export declare const createDerivedStore: <T>(stores: StoreLike<any>[], deriveFn: (storesValues: any[], set?: Function) => any, options?: Partial<CreateDerivedStoreOptions>) => StoreReadable<T>;
+export declare const createDerivedStore: <T>(stores: StoreLike<any>[], deriveFn: (storesValues: any[], set?: Function) => any, options?: CreateDerivedStoreOptions<T> | null) => StoreReadable<T>;
 export {};

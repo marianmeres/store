@@ -53,35 +53,35 @@ export interface StoreLike<T> extends StoreReadable<T> {
 	update(cb: Update<T>): void;
 }
 
-const isFn = (v) => typeof v === 'function';
+const isFn = (v: any) => typeof v === 'function';
 
-const assertFn = (v, prefix = '') => {
+const assertFn = (v: any, prefix = '') => {
 	if (!isFn(v)) throw new TypeError(`${prefix} Expecting function arg`.trim());
 };
 
 // naive ducktype
-export const isStoreLike = (v) => isFn(v.subscribe);
+export const isStoreLike = (v: any) => isFn(v.subscribe);
 
-export interface CreateStoreOptions {
-	persist: (v: any) => void;
+export interface CreateStoreOptions<T> {
+	persist?: (v: T) => void;
 }
 
 export const createStore = <T>(
-	initial = undefined,
-	options: Partial<CreateStoreOptions> = null
+	initial?: T,
+	options: CreateStoreOptions<T> | null = null
 ): StoreLike<T> => {
-	const _maybePersist = (v) => isFn(options?.persist) && options.persist(v);
+	const _maybePersist = (v: T) => isFn(options?.persist) && (options as any).persist(v);
 	let _pubsub = createPubSub();
-	let _value = initial;
+	let _value: T = initial as T;
 
 	// (maybe) persist now, even if no subscription
 	_maybePersist(_value);
 
-	const get = () => _value;
+	const get = (): T => _value;
 
 	// `set` is a method that takes one argument which is the value to be set. The store value
 	// gets set to the value of the argument if the store value is not already equal to it.
-	const set = (value) => {
+	const set = (value: any) => {
 		// shallow strict compare
 		if (_value !== value) {
 			_value = value;
@@ -92,7 +92,7 @@ export const createStore = <T>(
 
 	// `update` is a method that takes one argument which is a callback. The callback takes
 	// the existing store value as its argument and returns the new value to be set to the store.
-	const update = (cb) => {
+	const update = (cb: Update<T>) => {
 		assertFn(cb, '[update]');
 		set(cb(get()));
 	};
@@ -103,7 +103,7 @@ export const createStore = <T>(
 	// 2. The .subscribe method must return an unsubscribe function. Calling an unsubscribe
 	// function must stop its subscription, and its corresponding subscription function must not
 	// be called again by the store.
-	const subscribe = (cb) => {
+	const subscribe = (cb: Subscribe<T>) => {
 		assertFn(cb, '[subscribe]');
 		cb(_value);
 		return _pubsub.subscribe('change', cb);
@@ -113,19 +113,19 @@ export const createStore = <T>(
 };
 
 //
-interface CreateDerivedStoreOptions extends CreateStoreOptions {
-	initialValue: any;
+interface CreateDerivedStoreOptions<T> extends CreateStoreOptions<T> {
+	initialValue?: any;
 }
 
 export const createDerivedStore = <T>(
 	stores: StoreLike<any>[],
 	// supporting only subset of svelte api
 	deriveFn: (storesValues: any[], set?: Function) => any,
-	options: Partial<CreateDerivedStoreOptions> = null
+	options: CreateDerivedStoreOptions<T> | null = null
 ): StoreReadable<T> => {
-	const _maybePersist = (v) => isFn(options?.persist) && options.persist(v);
+	const _maybePersist = (v: T) => isFn(options?.persist) && (options as any).persist(v);
 	const derived = createStore<T>(options?.initialValue);
-	const _values = [];
+	const _values: any[] = [];
 
 	// save initial values first...
 	stores.forEach((s) => {
@@ -147,7 +147,7 @@ export const createDerivedStore = <T>(
 
 	//
 	let _subsCounter = 0;
-	let _internalUnsubs = [];
+	let _internalUnsubs: CallableFunction[] = [];
 
 	//
 	const _maybeInternalSubscribe = () => {
@@ -161,7 +161,7 @@ export const createDerivedStore = <T>(
 							derived.set(deriveFn(_values));
 							_maybePersist(derived.get());
 						} else {
-							deriveFn(_values, (v) => {
+							deriveFn(_values, (v: T) => {
 								derived.set(v);
 								_maybePersist(derived.get());
 							});
@@ -181,7 +181,7 @@ export const createDerivedStore = <T>(
 	};
 
 	//
-	const subscribe = (cb) => {
+	const subscribe = (cb: Subscribe<T>) => {
 		assertFn(cb, '[derived.subscribe]');
 		_maybeInternalSubscribe();
 		const unsub = derived.subscribe(cb);

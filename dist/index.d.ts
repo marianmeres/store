@@ -21,5 +21,5 @@ export declare const createStore: <T>(initial?: T | undefined, options?: CreateS
 interface CreateDerivedStoreOptions<T> extends CreateStoreOptions<T> {
     initialValue?: any;
 }
-export declare const createDerivedStore: <T>(stores: StoreLike<any>[], deriveFn: (storesValues: any[], set?: Function) => any, options?: CreateDerivedStoreOptions<T> | null) => StoreReadable<T>;
+export declare const createDerivedStore: <T>(stores: StoreLike<any>[], deriveFn: (storesValues: any[], set?: Function) => T, options?: CreateDerivedStoreOptions<T> | null) => StoreReadable<T>;
 export {};

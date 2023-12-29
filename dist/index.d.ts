@@ -10,8 +10,8 @@ export interface StoreLike<T> extends StoreReadable<T> {
     update(cb: Update<T>): void;
 }
 export declare const isStoreLike: (v: any) => boolean;
-interface CreateStoreOptions {
-    persist: Function;
+export interface CreateStoreOptions {
+    persist: (v: any) => void;
 }
 export declare const createStore: <T>(initial?: any, options?: Partial<CreateStoreOptions>) => StoreLike<T>;
 interface CreateDerivedStoreOptions extends CreateStoreOptions {

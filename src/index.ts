@@ -62,8 +62,8 @@ const assertFn = (v, prefix = '') => {
 // naive ducktype
 export const isStoreLike = (v) => isFn(v.subscribe);
 
-interface CreateStoreOptions {
-	persist: Function;
+export interface CreateStoreOptions {
+	persist: (v: any) => void;
 }
 
 export const createStore = <T>(

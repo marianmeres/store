@@ -68,23 +68,6 @@ export interface CreateStoreOptions<T> {
 
 declare const window: any;
 
-// quick-n-dirty helper to play nicely along
-export const createStoragePersistor = <T>(
-	key: string,
-	type: 'session' | 'local' = 'session'
-): { persist: (v: T) => void; get: () => T } => {
-	const storage = type === 'session' ? window?.sessionStorage : window?.localStorage;
-	// prettier-ignore
-	return {
-		persist: (v: T) => {
-			try { storage?.setItem(key, JSON.stringify(v)) } catch (e) { console.error(e) }
-		},
-		get: () => {
-			try { return JSON.parse(storage?.getItem(key)) } catch (e) {}
-		},
-	};
-};
-
 export const createStore = <T>(
 	initial?: T,
 	options: CreateStoreOptions<T> | null = null
@@ -212,4 +195,40 @@ export const createDerivedStore = <T>(
 
 	// omitting set (makes no sense for derived)
 	return { get: derived.get, subscribe };
+};
+
+// ADDONS...
+
+// quick-n-dirty helper which plays nicely along
+export const createStoragePersistor = <T>(
+	key: string,
+	type: 'session' | 'local' = 'session'
+): { remove: () => void; set: (v: T) => void; get: () => T | undefined } => {
+	const storage = type === 'session' ? window?.sessionStorage : window?.localStorage;
+	// prettier-ignore
+	return {
+		remove: () => storage?.removeItem(key),
+		set: (v: T) => {
+			try { storage?.setItem(key, JSON.stringify(v)) } catch (e) { console.error(e) }
+		},
+		get: (): T | undefined => { 
+			try { return JSON.parse(storage?.getItem(key)) } catch (e) {} 
+		},
+	};
+};
+
+// sugar
+export const createStorageStore = <T>(
+	key: string,
+	storageType: 'local' | 'session' = 'session',
+	initial?: T
+) => {
+	if (!['local', 'session'].includes(storageType)) {
+		console.warn(
+			`Ignoring invalid storageType '${storageType}', using 'session' instead.`
+		);
+		storageType = 'session';
+	}
+	const persistor = createStoragePersistor<T>(key, storageType);
+	return createStore<T>(persistor.get() || initial, { persist: persistor.set });
 };

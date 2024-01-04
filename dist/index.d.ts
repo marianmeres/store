@@ -13,13 +13,15 @@ export declare const isStoreLike: (v: any) => boolean;
 export interface CreateStoreOptions<T> {
     persist?: (v: T) => void;
 }
-export declare const createStoragePersistor: <T>(key: string, type?: 'session' | 'local') => {
-    persist: (v: T) => void;
-    get: () => T;
-};
 export declare const createStore: <T>(initial?: T | undefined, options?: CreateStoreOptions<T> | null) => StoreLike<T>;
 interface CreateDerivedStoreOptions<T> extends CreateStoreOptions<T> {
     initialValue?: any;
 }
 export declare const createDerivedStore: <T>(stores: StoreLike<any>[], deriveFn: (storesValues: any[], set?: Function) => T, options?: CreateDerivedStoreOptions<T> | null) => StoreReadable<T>;
+export declare const createStoragePersistor: <T>(key: string, type?: 'session' | 'local') => {
+    remove: () => void;
+    set: (v: T) => void;
+    get: () => T | undefined;
+};
+export declare const createStorageStore: <T>(key: string, storageType?: 'local' | 'session', initial?: T | undefined) => StoreLike<T>;
 export {};

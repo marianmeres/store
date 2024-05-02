@@ -81,10 +81,11 @@ suite.test('store set undefined', () => {
 });
 
 suite.test('derived works', () => {
-	const call_log = [];
+	let call_log = [];
 	const initialValue = 'hey';
 	const store = createStore('foo');
 	const store2 = createStore(123);
+
 	const derived = createDerivedStore(
 		[store, store2],
 		([a, b]) => {
@@ -94,54 +95,61 @@ suite.test('derived works', () => {
 		{ initialValue }
 	);
 
-	// no subscription yet, so initialValue only
-	assert(derived.get() === initialValue);
-	store.set('bar');
-	assert(derived.get() === initialValue);
-	store2.set(456);
-	assert(derived.get() === initialValue);
+	assert(derived.get() === 'foo,123');
 
-	// deriveFn must not have been called yet
-	assert(!call_log.length);
+	// 2 because each store triggers one call
+	assert(call_log.length === 2);
+	assert(call_log.join(';') === '[foo,123];[foo,123]');
+	call_log = []; // reset
 
 	// now subscribe
-	const log = [];
-	const unsub = derived.subscribe((v) => log.push(v));
+	let log = [];
+	let unsub = derived.subscribe((v) => log.push(v));
 
-	// derive fn must have been called twice (each store triggers)
-	assert(call_log.join(';') === '[bar,123];[bar,456]');
+	// 2 because each store creates one call internal subscribtion initially
+	assert(call_log.length === 2);
+	assert(call_log.join(';') === '[foo,123];[foo,123]');
+	call_log = []; // reset
+
+	store.set('bar');
+
+	// now only 1 call (only one store has changed)
+	assert(call_log.join(';') === '[bar,123]');
+	call_log = []; // reset
+
+	store2.set(456);
+
+	assert(call_log.join(';') === '[bar,456]');
+	call_log = []; // reset
 
 	// actual derived value
 	assert(derived.get() === 'bar,456');
-	assert(log.join(';') === 'bar,456');
+
+	// log contains full change history
+	assert(log.join(';') === 'foo,123;bar,123;bar,456');
 
 	// update some
 	store.set('baz');
-
-	// called one more time (only one store has changed)
-	assert(call_log.join(';') === '[bar,123];[bar,456];[baz,456]');
-	//
 	assert(derived.get() === 'baz,456');
-	assert(log.join(';') === 'bar,456;baz,456');
+	assert(call_log.join(';') === '[baz,456]');
+	call_log = []; // reset
 
 	// once unsubscribed, no more new derived calls
 	unsub();
 	store.set('bat');
 	store2.set(789);
 
-	// same as before
-	assert(call_log.join(';') === '[bar,123];[bar,456];[baz,456]');
-	assert(derived.get() === 'baz,456');
-	assert(log.join(';') === 'bar,456;baz,456');
+	assert(!call_log.length);
 
 	// resubscribe
-	derived.subscribe((v) => log.push(v));
+	unsub = derived.subscribe((v) => log.push(v));
 
-	// two new derive calls
-	assert(call_log.join(';') === '[bar,123];[bar,456];[baz,456];[bat,456];[bat,789]');
+	//
 	assert(derived.get() === 'bat,789');
-	// one new
-	assert(log.join(';') === 'bar,456;baz,456;bat,789');
+	assert(call_log.join(';') === '[bat,456];[bat,789]');
+	call_log = []; // reset
+
+	unsub();
 });
 
 suite.test('derived undefined input', () => {
@@ -160,6 +168,8 @@ suite.test('derived undefined input', () => {
 	store.set(undefined);
 	assert(derived.get() === undefined);
 	assert(call_log.join(';') === '[foo];[undefined]');
+
+	unsub();
 });
 
 suite.test('derived async', async () => {

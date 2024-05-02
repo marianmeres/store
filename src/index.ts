@@ -193,8 +193,14 @@ export const createDerivedStore = <T>(
 		};
 	};
 
+	const get = (): T => {
+		let v: any;
+		subscribe((_v) => (v = _v))(); // sub + unsub
+		return v;
+	};
+
 	// omitting set (makes no sense for derived)
-	return { get: derived.get, subscribe };
+	return { get, subscribe };
 };
 
 // ADDONS...

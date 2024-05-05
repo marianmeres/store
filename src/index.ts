@@ -120,7 +120,7 @@ interface CreateDerivedStoreOptions<T> extends CreateStoreOptions<T> {
 }
 
 export const createDerivedStore = <T>(
-	stores: StoreLike<any>[],
+	stores: StoreReadable<any>[],
 	// supporting only subset of svelte api
 	deriveFn: (storesValues: any[], set?: Function) => T,
 	options: CreateDerivedStoreOptions<T> | null = null

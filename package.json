@@ -21,7 +21,7 @@
 		"release:patch": "release -v patch",
 		"test": "test-runner",
 		"test:watch": "nodemon -q -w \"src/**/*.*\" -w \"tests/**/*.*\" -x test-runner --",
-		"build": "npm run clean && rollup --bundleConfigAsCjs -c",
+		"build": "npm run clean && rollup -c",
 		"dev": "npm run clean && rollup -c -w"
 	},
 	"repository": {
@@ -50,12 +50,12 @@
 		"nodemon": "^3.0.2",
 		"prettier": "^3.1.1",
 		"rimraf": "^5.0.5",
-		"rollup": "^4.9.0",
+		"rollup": "^4.22.4",
 		"terser": "^5.16.1",
-		"tslib": "^2.6.2",
+		"tslib": "^2.7.0",
 		"typescript": "^5.3.3"
 	},
 	"dependencies": {
-		"@marianmeres/pubsub": "^1.1.0"
+		"@marianmeres/pubsub": "^1.2.5"
 	}
 }

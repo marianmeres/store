@@ -3,7 +3,6 @@ import { strict as assert } from 'node:assert';
 import { TestRunner } from '@marianmeres/test-runner';
 import { fileURLToPath } from 'node:url';
 import { createDerivedStore, createStore } from '../dist/index.js';
-import isEqual from 'lodash/isEqual.js';
 import { createClog } from '@marianmeres/clog';
 
 const clog = createClog(path.basename(fileURLToPath(import.meta.url)));

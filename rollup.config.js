@@ -1,21 +1,22 @@
-import fs from 'node:fs';
-import typescript from '@rollup/plugin-typescript';
-import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
+import resolve from '@rollup/plugin-node-resolve';
 import terser from '@rollup/plugin-terser';
+import typescript from '@rollup/plugin-typescript';
+import fs from 'node:fs';
 
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 
+const plugins = [resolve(), commonjs(), typescript(), terser()];
+
 export default [
-	// browser-friendly UMD build
 	{
 		input: 'src/index.ts',
 		output: { name: 'store', file: pkg.browser, format: 'umd' },
-		plugins: [resolve(), commonjs(), typescript(), terser()],
+		plugins,
 	},
 	{
 		input: 'src/index.ts',
-		plugins: [resolve(), commonjs(), typescript(), terser()],
+		plugins,
 		output: [
 			{ file: pkg.main, format: 'cjs' },
 			{ file: pkg.module, format: 'es' },

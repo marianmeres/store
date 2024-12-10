@@ -66,8 +66,6 @@ export interface CreateStoreOptions<T> {
 	persist?: (v: T) => void;
 }
 
-declare const window: any;
-
 export const createStore = <T>(
 	initial?: T,
 	options: CreateStoreOptions<T> | null = null
@@ -210,7 +208,8 @@ export const createStoragePersistor = <T>(
 	key: string,
 	type: 'session' | 'local' = 'session'
 ): { remove: () => void; set: (v: T) => void; get: () => T | undefined } => {
-	const storage = type === 'session' ? window?.sessionStorage : window?.localStorage;
+	const storage: any =
+		type === 'session' ? globalThis?.sessionStorage : globalThis?.localStorage;
 	// prettier-ignore
 	return {
 		remove: () => storage?.removeItem(key),

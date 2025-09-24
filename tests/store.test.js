@@ -2,7 +2,12 @@ import path from 'node:path';
 import { strict as assert } from 'node:assert';
 import { TestRunner } from '@marianmeres/test-runner';
 import { fileURLToPath } from 'node:url';
-import { createDerivedStore, createStore } from '../dist/index.js';
+import {
+	createDerivedStore,
+	createStore,
+	createStoragePersistor,
+	createStorageStore,
+} from '../dist/index.js';
 import { createClog } from '@marianmeres/clog';
 
 const clog = createClog(path.basename(fileURLToPath(import.meta.url)));
@@ -65,6 +70,18 @@ suite.test('persist works', () => {
 	assert(storage === 'foo');
 	store.set('bar');
 	assert(storage === 'bar');
+});
+
+suite.test('persistor', () => {
+	const p = createStoragePersistor('foo', 'memory');
+	p.set('bar');
+
+	const store = createStore(p.get(), { persist: p.set });
+	assert(store.get() === 'bar');
+
+	store.set('baz');
+	assert(store.get() === 'baz');
+	assert(p.__raw().foo === 'baz');
 });
 
 suite.test('store update works', () => {

@@ -18,10 +18,13 @@ interface CreateDerivedStoreOptions<T> extends CreateStoreOptions<T> {
     initialValue?: any;
 }
 export declare const createDerivedStore: <T>(stores: StoreReadable<any>[], deriveFn: (storesValues: any[], set?: Function) => T, options?: CreateDerivedStoreOptions<T> | null) => StoreReadable<T>;
-export declare const createStoragePersistor: <T>(key: string, type?: "session" | "local") => {
+interface Persistor<T> {
     remove: () => void;
     set: (v: T) => void;
     get: () => T | undefined;
-};
-export declare const createStorageStore: <T>(key: string, storageType?: "local" | "session", initial?: T) => StoreLike<T>;
+    clear: () => void;
+    __raw: () => any;
+}
+export declare const createStoragePersistor: <T>(key: string, type?: "session" | "local" | "memory") => Persistor<T>;
+export declare const createStorageStore: <T>(key: string, storageType?: "local" | "session" | "memory", initial?: T) => StoreLike<T>;
 export {};

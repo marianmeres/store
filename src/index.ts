@@ -204,10 +204,35 @@ export const createDerivedStore = <T>(
 // ADDONS...
 
 // quick-n-dirty helper which plays nicely along
+
+interface Persistor<T> {
+	remove: () => void;
+	set: (v: T) => void;
+	get: () => T | undefined;
+	clear: () => void;
+	__raw: () => any;
+}
+
+let __memory: Record<string, any> = {};
+
+const _createMemoryPersistor = <T>(key: string) => {
+	// prettier-ignore
+	return {
+		remove: () => { delete __memory[key]; },
+		set: (v: T) => { __memory[key] = v; },
+		get: () => { return __memory[key]; },
+		clear: () => { __memory = {}; },
+		__raw: () => __memory, // for tests
+	};
+};
+
 export const createStoragePersistor = <T>(
 	key: string,
-	type: 'session' | 'local' = 'session'
-): { remove: () => void; set: (v: T) => void; get: () => T | undefined } => {
+	type: 'session' | 'local' | 'memory' = 'session'
+): Persistor<T> => {
+	// memory special case
+	if (type === 'memory') return _createMemoryPersistor(key);
+
 	const storage: any =
 		type === 'session' ? globalThis?.sessionStorage : globalThis?.localStorage;
 	// prettier-ignore
@@ -219,16 +244,18 @@ export const createStoragePersistor = <T>(
 		get: (): T | undefined => { 
 			try { return JSON.parse(storage?.getItem(key)) } catch (e) {} 
 		},
+		clear: () => { try {storage.clear() } catch (e) {} },
+		__raw: () => storage, // for tests
 	};
 };
 
 // sugar
 export const createStorageStore = <T>(
 	key: string,
-	storageType: 'local' | 'session' = 'session',
+	storageType: 'local' | 'session' | 'memory' = 'session',
 	initial?: T
 ) => {
-	if (!['local', 'session'].includes(storageType)) {
+	if (!['local', 'session', 'memory'].includes(storageType)) {
 		console.warn(
 			`Ignoring invalid storageType '${storageType}', using 'session' instead.`
 		);

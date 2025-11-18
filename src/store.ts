@@ -26,7 +26,7 @@ export interface StoreLike<T> extends StoreReadable<T> {
 /**
  * Check whether the value looks like a store (Naive ducktype check)
  */
-export const isStoreLike = (v: any) => isFn(v.subscribe);
+export const isStoreLike = (v: any): boolean => isFn(v.subscribe);
 
 /** Store options */
 export interface CreateStoreOptions<T> {
@@ -256,7 +256,7 @@ export const createStorageStore = <T>(
 	key: string,
 	storageType: "local" | "session" | "memory" = "session",
 	initial?: T
-) => {
+): StoreLike<T> => {
 	if (!["local", "session", "memory"].includes(storageType)) {
 		console.warn(
 			`Ignoring invalid storageType '${storageType}', using 'session' instead.`

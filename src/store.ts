@@ -1,77 +1,67 @@
-import { createPubSub } from '@marianmeres/pubsub';
+import { createPubSub } from "@marianmeres/pubsub";
 
-/*
-https://svelte.dev/docs#component-format-script-4-prefix-stores-with-$-to-access-their-values-store-contract
+const isFn = (v: any) => typeof v === "function";
 
-# Store contract
+const assertFn = (v: any, prefix = "") => {
+	if (!isFn(v)) throw new TypeError(`${prefix} Expecting function arg`.trim());
+};
 
-```
-store = {
-	subscribe: (subscription: (value: any) => void) => (() => void),
-	set?: (value: any) => void
-}
-```
+export type Subscribe<T> = (value: T) => void;
+export type Unsubscribe = () => void;
+export type Update<T> = (value: T) => T;
 
-You can create your own stores without relying on svelte/store, by implementing the store
-contract:
-
-1. A store must contain a .subscribe method, which must accept as its argument a subscription
-function. This subscription function must be immediately and synchronously called with the
-store's current value upon calling .subscribe. All of a store's active subscription functions
-must later be synchronously called whenever the store's value changes.
-
-2. The .subscribe method must return an unsubscribe function. Calling an unsubscribe
-function must stop its subscription, and its corresponding subscription function must not
-be called again by the store.
-
-3. A store may optionally contain a .set method, which must accept as its argument a new
-value for the store, and which synchronously calls all of the store's active subscription
-functions. Such a store is called a writable store.
-
-For interoperability with RxJS Observables, the .subscribe method is also allowed to return
-an object with an .unsubscribe method, rather than return the unsubscription function directly.
-Note however that unless .subscribe synchronously calls the subscription (which is not
-required by the Observable spec), Svelte will see the value of the store as undefined until
-it does.
-*/
-
-// https://svelte.dev/docs#run-time-svelte-store-writable
-// https://svelte.dev/docs#run-time-svelte-store-derived
-
-export declare type Subscribe<T> = (value: T) => void;
-export declare type Unsubscribe = () => void;
-export declare type Update<T> = (value: T) => T;
-
+/** store readable */
 export interface StoreReadable<T> {
 	subscribe(cb: Subscribe<T>): Unsubscribe;
 	// extra
 	get: () => T;
 }
 
+/** Store like  */
 export interface StoreLike<T> extends StoreReadable<T> {
 	set(value: T): void;
 	update(cb: Update<T>): void;
 }
 
-const isFn = (v: any) => typeof v === 'function';
-
-const assertFn = (v: any, prefix = '') => {
-	if (!isFn(v)) throw new TypeError(`${prefix} Expecting function arg`.trim());
-};
-
-// naive ducktype
+/**
+ * Check whether the value looks like a store (Naive ducktype check)
+ */
 export const isStoreLike = (v: any) => isFn(v.subscribe);
 
+/** Store options */
 export interface CreateStoreOptions<T> {
 	persist?: (v: T) => void;
 }
 
+/**
+ * Creates svelte/store compatible store, by implementing the store contract:
+ *
+ * 1. A store must contain a .subscribe method, which must accept as its argument a subscription
+ * function. This subscription function must be immediately and synchronously called with the
+ * store's current value upon calling .subscribe. All of a store's active subscription functions
+ * must later be synchronously called whenever the store's value changes.
+ *
+ * 2. The .subscribe method must return an unsubscribe function. Calling an unsubscribe
+ * function must stop its subscription, and its corresponding subscription function must not
+ * be called again by the store.
+ *
+ * 3. A store may optionally contain a .set method, which must accept as its argument a new
+ * value for the store, and which synchronously calls all of the store's active subscription
+ * functions. Such a store is called a writable store.
+ *
+ * For interoperability with RxJS Observables, the .subscribe method is also allowed to return
+ * an object with an .unsubscribe method, rather than return the unsubscription function directly.
+ * Note however that unless .subscribe synchronously calls the subscription (which is not
+ * required by the Observable spec), Svelte will see the value of the store as undefined until
+ * it does.
+ */
 export const createStore = <T>(
 	initial?: T,
 	options: CreateStoreOptions<T> | null = null
 ): StoreLike<T> => {
-	const _maybePersist = (v: T) => isFn(options?.persist) && (options as any).persist(v);
-	let _pubsub = createPubSub();
+	const _maybePersist = (v: T) =>
+		isFn(options?.persist) && (options as any).persist(v);
+	const _pubsub = createPubSub();
 	let _value: T = initial as T;
 
 	// (maybe) persist now, even if no subscription
@@ -86,14 +76,14 @@ export const createStore = <T>(
 		if (_value !== value) {
 			_value = value;
 			_maybePersist(_value);
-			_pubsub.publish('change', _value);
+			_pubsub.publish("change", _value);
 		}
 	};
 
 	// `update` is a method that takes one argument which is a callback. The callback takes
 	// the existing store value as its argument and returns the new value to be set to the store.
 	const update = (cb: Update<T>) => {
-		assertFn(cb, '[update]');
+		assertFn(cb, "[update]");
 		set(cb(get()));
 	};
 
@@ -104,9 +94,9 @@ export const createStore = <T>(
 	// function must stop its subscription, and its corresponding subscription function must not
 	// be called again by the store.
 	const subscribe = (cb: Subscribe<T>) => {
-		assertFn(cb, '[subscribe]');
+		assertFn(cb, "[subscribe]");
 		cb(_value);
-		return _pubsub.subscribe('change', cb);
+		return _pubsub.subscribe("change", cb);
 	};
 
 	return { set, get, update, subscribe };
@@ -117,31 +107,38 @@ interface CreateDerivedStoreOptions<T> extends CreateStoreOptions<T> {
 	initialValue?: any;
 }
 
+/**
+ * Creates derived store
+ */
 export const createDerivedStore = <T>(
 	stores: StoreReadable<any>[],
 	// supporting only subset of svelte api
-	deriveFn: (storesValues: any[], set?: Function) => T,
+	deriveFn: (storesValues: any[], set?: CallableFunction) => T,
 	options: CreateDerivedStoreOptions<T> | null = null
 ): StoreReadable<T> => {
-	const _maybePersist = (v: T) => isFn(options?.persist) && (options as any).persist(v);
+	const _maybePersist = (v: T) =>
+		isFn(options?.persist) && (options as any).persist(v);
 	const derived = createStore<T>(options?.initialValue);
 	const _values: any[] = [];
 
 	// save initial values first...
 	stores.forEach((s) => {
-		if (!isStoreLike(s)) throw new TypeError('Expecting array of StoreLike objects');
+		if (!isStoreLike(s))
+			throw new TypeError("Expecting array of StoreLike objects");
 		// sub & immediately unsub (we could use _values.push(s.get()) but that wouldn't
 		// be native Svelte store compatible)
 		s.subscribe((v) => _values.push(v))();
 	});
 
 	if (!isFn(deriveFn)) {
-		throw new TypeError('Expecting second argument to be the derivative function');
+		throw new TypeError(
+			"Expecting second argument to be the derivative function"
+		);
 	}
 
 	if (!deriveFn.length || deriveFn.length > 2) {
 		throw new TypeError(
-			'Expecting the derivative function to have exactly 1 or 2 arguments'
+			"Expecting the derivative function to have exactly 1 or 2 arguments"
 		);
 	}
 
@@ -182,7 +179,7 @@ export const createDerivedStore = <T>(
 
 	//
 	const subscribe = (cb: Subscribe<T>) => {
-		assertFn(cb, '[derived.subscribe]');
+		assertFn(cb, "[derived.subscribe]");
 		_maybeInternalSubscribe();
 		const unsub = derived.subscribe(cb);
 		return () => {
@@ -226,15 +223,18 @@ const _createMemoryPersistor = <T>(key: string) => {
 	};
 };
 
+/**
+ * Creates store which value persists in storage
+ */
 export const createStoragePersistor = <T>(
 	key: string,
-	type: 'session' | 'local' | 'memory' = 'session'
+	type: "session" | "local" | "memory" = "session"
 ): Persistor<T> => {
 	// memory special case
-	if (type === 'memory') return _createMemoryPersistor(key);
+	if (type === "memory") return _createMemoryPersistor(key);
 
 	const storage: any =
-		type === 'session' ? globalThis?.sessionStorage : globalThis?.localStorage;
+		type === "session" ? globalThis?.sessionStorage : globalThis?.localStorage;
 	// prettier-ignore
 	return {
 		remove: () => storage?.removeItem(key),
@@ -249,17 +249,19 @@ export const createStoragePersistor = <T>(
 	};
 };
 
-// sugar
+/**
+ * Convenience helper to create storage compatible for `createStoragePersistor`
+ */
 export const createStorageStore = <T>(
 	key: string,
-	storageType: 'local' | 'session' | 'memory' = 'session',
+	storageType: "local" | "session" | "memory" = "session",
 	initial?: T
 ) => {
-	if (!['local', 'session', 'memory'].includes(storageType)) {
+	if (!["local", "session", "memory"].includes(storageType)) {
 		console.warn(
 			`Ignoring invalid storageType '${storageType}', using 'session' instead.`
 		);
-		storageType = 'session';
+		storageType = "session";
 	}
 	const persistor = createStoragePersistor<T>(key, storageType);
 	return createStore<T>(persistor.get() || initial, { persist: persistor.set });

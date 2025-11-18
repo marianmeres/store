@@ -6,8 +6,13 @@ const assertFn = (v: any, prefix = "") => {
 	if (!isFn(v)) throw new TypeError(`${prefix} Expecting function arg`.trim());
 };
 
+/** Subscribe fn */
 export type Subscribe<T> = (value: T) => void;
+
+/** Unsubscribe fn */
 export type Unsubscribe = () => void;
+
+/** Updater fn */
 export type Update<T> = (value: T) => T;
 
 /** store readable */

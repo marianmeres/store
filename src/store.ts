@@ -6,66 +6,79 @@ const assertFn = (v: any, prefix = "") => {
 	if (!isFn(v)) throw new TypeError(`${prefix} Expecting function arg`.trim());
 };
 
-/** Subscribe fn */
+/** Subscription callback function that receives the current store value */
 export type Subscribe<T> = (value: T) => void;
 
-/** Unsubscribe fn */
+/** Unsubscribe function returned by subscribe() to stop receiving updates */
 export type Unsubscribe = () => void;
 
-/** Updater fn */
+/** Update function that receives the current value and returns the new value */
 export type Update<T> = (value: T) => T;
 
-/** store readable */
+/** Readable store interface with subscribe and get methods */
 export interface StoreReadable<T> {
 	subscribe(cb: Subscribe<T>): Unsubscribe;
-	// extra
 	get: () => T;
 }
 
-/** Store like  */
+/** Writable store interface extending readable with set and update methods */
 export interface StoreLike<T> extends StoreReadable<T> {
 	set(value: T): void;
 	update(cb: Update<T>): void;
 }
 
 /**
- * Check whether the value looks like a store (Naive ducktype check)
+ * Check whether a value implements the store interface.
+ * Uses duck typing to check for the presence of a subscribe method.
  */
 export const isStoreLike = (v: any): boolean => isFn(v.subscribe);
 
-/** Store options */
+/** Configuration options for store creation */
 export interface CreateStoreOptions<T> {
+	/** Optional callback to persist store values (e.g., to localStorage) */
 	persist?: (v: T) => void;
+	/** Optional callback to handle persistence errors */
+	onPersistError?: (error: unknown) => void;
 }
 
 /**
- * Creates svelte/store compatible store, by implementing the store contract:
+ * Creates a writable store with reactive subscriptions.
  *
- * 1. A store must contain a .subscribe method, which must accept as its argument a subscription
- * function. This subscription function must be immediately and synchronously called with the
- * store's current value upon calling .subscribe. All of a store's active subscription functions
- * must later be synchronously called whenever the store's value changes.
+ * The store is Svelte store contract compatible, which means:
+ * - Subscriptions are called synchronously with the current value on subscribe
+ * - All active subscriptions are notified synchronously when the value changes
+ * - Values are compared using strict equality (===) before notifying subscribers
  *
- * 2. The .subscribe method must return an unsubscribe function. Calling an unsubscribe
- * function must stop its subscription, and its corresponding subscription function must not
- * be called again by the store.
+ * @param initial - The initial value of the store
+ * @param options - Optional configuration for persistence and error handling
+ * @returns A writable store with get(), set(), update(), and subscribe() methods
  *
- * 3. A store may optionally contain a .set method, which must accept as its argument a new
- * value for the store, and which synchronously calls all of the store's active subscription
- * functions. Such a store is called a writable store.
- *
- * For interoperability with RxJS Observables, the .subscribe method is also allowed to return
- * an object with an .unsubscribe method, rather than return the unsubscription function directly.
- * Note however that unless .subscribe synchronously calls the subscription (which is not
- * required by the Observable spec), Svelte will see the value of the store as undefined until
- * it does.
+ * @example
+ * ```ts
+ * const count = createStore(0);
+ * const unsub = count.subscribe(val => console.log(val)); // logs: 0
+ * count.set(1); // logs: 1
+ * count.update(n => n + 1); // logs: 2
+ * unsub();
+ * ```
  */
 export const createStore = <T>(
 	initial?: T,
-	options: CreateStoreOptions<T> | null = null
+	options: CreateStoreOptions<T> | null = null,
 ): StoreLike<T> => {
-	const _maybePersist = (v: T) =>
-		isFn(options?.persist) && (options as any).persist(v);
+	const _maybePersist = (v: T) => {
+		if (options?.persist) {
+			try {
+				options.persist(v);
+			} catch (e) {
+				if (options.onPersistError) {
+					options.onPersistError(e);
+				} else {
+					console.warn('Store persistence failed:', e);
+				}
+			}
+		}
+	};
 	const _pubsub = createPubSub();
 	let _value: T = initial as T;
 
@@ -76,7 +89,7 @@ export const createStore = <T>(
 
 	// `set` is a method that takes one argument which is the value to be set. The store value
 	// gets set to the value of the argument if the store value is not already equal to it.
-	const set = (value: any) => {
+	const set = (value: T) => {
 		// shallow strict compare
 		if (_value !== value) {
 			_value = value;
@@ -107,29 +120,67 @@ export const createStore = <T>(
 	return { set, get, update, subscribe };
 };
 
-//
+/** Configuration options for derived store creation */
 interface CreateDerivedStoreOptions<T> extends CreateStoreOptions<T> {
+	/** Initial value for the derived store before first computation */
 	initialValue?: any;
 }
 
 /**
- * Creates derived store
+ * Creates a derived store that computes its value from one or more source stores.
+ *
+ * The derived store:
+ * - Automatically subscribes to source stores only when it has active subscribers
+ * - Unsubscribes from sources when all subscribers are removed
+ * - Can compute values synchronously or asynchronously (using the set callback)
+ * - Supports on-demand computation via get() even without active subscriptions
+ *
+ * @param stores - Array of source stores to derive from
+ * @param deriveFn - Function to compute the derived value. Takes an array of source values
+ *                   and optionally a set callback for async updates
+ * @param options - Optional configuration for initial value and persistence
+ * @returns A readable store with get() and subscribe() methods
+ *
+ * @example
+ * ```ts
+ * // Synchronous derivation
+ * const a = createStore(2);
+ * const b = createStore(3);
+ * const sum = createDerivedStore([a, b], ([aVal, bVal]) => aVal + bVal);
+ * console.log(sum.get()); // 5
+ *
+ * // Asynchronous derivation
+ * const async = createDerivedStore([a], ([val], set) => {
+ *   setTimeout(() => set(val * 2), 100);
+ * });
+ * ```
  */
 export const createDerivedStore = <T>(
 	stores: StoreReadable<any>[],
-	// supporting only subset of svelte api
 	deriveFn: (storesValues: any[], set?: CallableFunction) => T,
-	options: CreateDerivedStoreOptions<T> | null = null
+	options: CreateDerivedStoreOptions<T> | null = null,
 ): StoreReadable<T> => {
-	const _maybePersist = (v: T) =>
-		isFn(options?.persist) && (options as any).persist(v);
+	const _maybePersist = (v: T) => {
+		if (options?.persist) {
+			try {
+				options.persist(v);
+			} catch (e) {
+				if (options.onPersistError) {
+					options.onPersistError(e);
+				} else {
+					console.warn('Derived store persistence failed:', e);
+				}
+			}
+		}
+	};
 	const derived = createStore<T>(options?.initialValue);
 	const _values: any[] = [];
 
 	// save initial values first...
 	stores.forEach((s) => {
-		if (!isStoreLike(s))
+		if (!isStoreLike(s)) {
 			throw new TypeError("Expecting array of StoreLike objects");
+		}
 		// sub & immediately unsub (we could use _values.push(s.get()) but that wouldn't
 		// be native Svelte store compatible)
 		s.subscribe((v) => _values.push(v))();
@@ -137,13 +188,13 @@ export const createDerivedStore = <T>(
 
 	if (!isFn(deriveFn)) {
 		throw new TypeError(
-			"Expecting second argument to be the derivative function"
+			"Expecting second argument to be the derivative function",
 		);
 	}
 
 	if (!deriveFn.length || deriveFn.length > 2) {
 		throw new TypeError(
-			"Expecting the derivative function to have exactly 1 or 2 arguments"
+			"Expecting the derivative function to have exactly 1 or 2 arguments",
 		);
 	}
 
@@ -168,7 +219,7 @@ export const createDerivedStore = <T>(
 								_maybePersist(derived.get());
 							});
 						}
-					})
+					}),
 				);
 			});
 		}
@@ -193,6 +244,9 @@ export const createDerivedStore = <T>(
 		};
 	};
 
+	// Note: get() triggers on-demand computation by temporarily subscribing and unsubscribing.
+	// This ensures fresh values are always available, even without active subscriptions.
+	// For performance-critical code with frequent reads, maintain an active subscription instead.
 	const get = (): T => {
 		let v: any;
 		subscribe((_v) => (v = _v))(); // sub + unsub
@@ -203,68 +257,136 @@ export const createDerivedStore = <T>(
 	return { get, subscribe };
 };
 
-// ADDONS...
-
-// quick-n-dirty helper which plays nicely along
-
+/** Storage persistor interface for storing and retrieving values */
 interface Persistor<T> {
+	/** Remove the stored value for this key */
 	remove: () => void;
+	/** Store a value */
 	set: (v: T) => void;
+	/** Retrieve the stored value, or undefined if not found */
 	get: () => T | undefined;
+	/** Clear all stored values (affects entire storage) */
 	clear: () => void;
+	/** Access the underlying storage mechanism (for testing) */
 	__raw: () => any;
 }
 
-let __memory: Record<string, any> = {};
+const _memoryStorage = new Map<string, any>();
 
 const _createMemoryPersistor = <T>(key: string) => {
 	// prettier-ignore
 	return {
-		remove: () => { delete __memory[key]; },
-		set: (v: T) => { __memory[key] = v; },
-		get: () => { return __memory[key]; },
-		clear: () => { __memory = {}; },
-		__raw: () => __memory, // for tests
+		remove: () => {
+			_memoryStorage.delete(key);
+		},
+		set: (v: T) => {
+			_memoryStorage.set(key, v);
+		},
+		get: () => {
+			return _memoryStorage.get(key);
+		},
+		clear: () => {
+			_memoryStorage.clear();
+		},
+		__raw: () => _memoryStorage, // for tests
 	};
 };
 
 /**
- * Creates store which value persists in storage
+ * Creates a storage persistence adapter for use with stores.
+ *
+ * Supports three storage types:
+ * - "local": Uses localStorage (persists across browser sessions)
+ * - "session": Uses sessionStorage (persists for the current session)
+ * - "memory": Uses in-memory Map (clears on page reload)
+ *
+ * Values are automatically serialized/deserialized using JSON.
+ * Errors are logged to console as warnings.
+ *
+ * @param key - The storage key to use
+ * @param type - Storage type: "local", "session", or "memory"
+ * @returns A persistor object with get/set/remove/clear methods
+ *
+ * @example
+ * ```ts
+ * const persistor = createStoragePersistor("user", "local");
+ * const store = createStore(persistor.get() || { name: "Guest" }, {
+ *   persist: persistor.set
+ * });
+ * ```
  */
 export const createStoragePersistor = <T>(
 	key: string,
-	type: "session" | "local" | "memory" = "session"
+	type: "session" | "local" | "memory" = "session",
 ): Persistor<T> => {
 	// memory special case
 	if (type === "memory") return _createMemoryPersistor(key);
 
-	const storage: any =
-		type === "session" ? globalThis?.sessionStorage : globalThis?.localStorage;
+	const storage: any = type === "session"
+		? globalThis?.sessionStorage
+		: globalThis?.localStorage;
 	// prettier-ignore
 	return {
-		remove: () => storage?.removeItem(key),
+		remove: () => {
+			try {
+				storage?.removeItem(key);
+			} catch (e) {
+				console.warn(`Failed to remove storage key '${key}':`, e);
+			}
+		},
 		set: (v: T) => {
-			try { storage?.setItem(key, JSON.stringify(v)) } catch (e) { console.error(e) }
+			try {
+				storage?.setItem(key, JSON.stringify(v));
+			} catch (e) {
+				console.warn(`Failed to persist to storage key '${key}':`, e);
+			}
 		},
-		get: (): T | undefined => { 
-			try { return JSON.parse(storage?.getItem(key)) } catch (e) {} 
+		get: (): T | undefined => {
+			try {
+				const item = storage?.getItem(key);
+				return item ? JSON.parse(item) : undefined;
+			} catch (e) {
+				console.warn(`Failed to read from storage key '${key}':`, e);
+				return undefined;
+			}
 		},
-		clear: () => { try {storage.clear() } catch (e) {} },
+		clear: () => {
+			try {
+				storage?.clear();
+			} catch (e) {
+				console.warn('Failed to clear storage:', e);
+			}
+		},
 		__raw: () => storage, // for tests
 	};
 };
 
 /**
- * Convenience helper to create storage compatible for `createStoragePersistor`
+ * Creates a writable store with automatic storage persistence.
+ *
+ * This is a convenience wrapper that combines createStore and createStoragePersistor.
+ * The store will automatically persist its value to the specified storage on every change.
+ * On creation, it attempts to restore the value from storage, falling back to the initial value.
+ *
+ * @param key - The storage key to use
+ * @param storageType - Storage type: "local", "session", or "memory" (default: "session")
+ * @param initial - Initial value if nothing is found in storage
+ * @returns A writable store that automatically persists to storage
+ *
+ * @example
+ * ```ts
+ * const preferences = createStorageStore("prefs", "local", { theme: "dark" });
+ * preferences.set({ theme: "light" }); // automatically saved to localStorage
+ * ```
  */
 export const createStorageStore = <T>(
 	key: string,
 	storageType: "local" | "session" | "memory" = "session",
-	initial?: T
+	initial?: T,
 ): StoreLike<T> => {
 	if (!["local", "session", "memory"].includes(storageType)) {
 		console.warn(
-			`Ignoring invalid storageType '${storageType}', using 'session' instead.`
+			`Ignoring invalid storageType '${storageType}', using 'session' instead.`,
 		);
 		storageType = "session";
 	}

@@ -1,9 +1,5 @@
-import {
-	createDerivedStore,
-	createStoragePersistor,
-	createStore,
-} from "../src/store.ts";
-import { assert, assertEquals } from "@std/assert";
+import { createDerivedStore, createStoragePersistor, createStore, createStorageStore } from "../src/store.ts";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -72,7 +68,7 @@ Deno.test("persistor", () => {
 
 	store.set("baz");
 	assertEquals(store.get(), "baz");
-	assertEquals(p.__raw().foo, "baz");
+	assertEquals(p.__raw().get("foo"), "baz");
 });
 
 Deno.test("store update works", () => {
@@ -99,7 +95,7 @@ Deno.test("derived works", () => {
 			call_log.push(`[${a},${b}]`);
 			return [a, b].join();
 		},
-		{ initialValue }
+		{ initialValue },
 	);
 
 	assertEquals(derived.get(), "foo,123");
@@ -206,6 +202,234 @@ Deno.test("derived async", async () => {
 
 	// note that undefined is stringified as null
 	assertEquals(JSON.stringify(log), '[null,"a,1","b,1"]');
+
+	unsub();
+});
+
+Deno.test("persistence error handling with onPersistError", () => {
+	const errors: unknown[] = [];
+	const persist = () => {
+		throw new Error("Persistence failed!");
+	};
+
+	const store = createStore("foo", {
+		persist,
+		onPersistError: (e) => errors.push(e),
+	});
+
+	// Initial persist should capture error
+	assertEquals(errors.length, 1);
+	assert(errors[0] instanceof Error);
+	assertEquals((errors[0] as Error).message, "Persistence failed!");
+
+	// Set should also capture error
+	store.set("bar");
+	assertEquals(errors.length, 2);
+});
+
+Deno.test("persistence error handling with default warning", () => {
+	const originalWarn = console.warn;
+	const warnings: any[] = [];
+	console.warn = (...args: any[]) => warnings.push(args);
+
+	try {
+		const persist = () => {
+			throw new Error("Persistence failed!");
+		};
+
+		const store = createStore("foo", { persist });
+
+		// Should have warned on initial persist
+		assertEquals(warnings.length, 1);
+		assertEquals(warnings[0][0], "Store persistence failed:");
+
+		store.set("bar");
+		assertEquals(warnings.length, 2);
+	} finally {
+		console.warn = originalWarn;
+	}
+});
+
+Deno.test("setting same value twice does not notify subscribers", () => {
+	const log: any[] = [];
+	const store = createStore("foo");
+
+	store.subscribe((v) => log.push(v));
+	assertEquals(log.length, 1); // initial call
+
+	store.set("foo"); // same value
+	assertEquals(log.length, 1); // should not notify
+
+	store.set("bar"); // different value
+	assertEquals(log.length, 2); // should notify
+
+	store.set("bar"); // same value again
+	assertEquals(log.length, 2); // should not notify
+});
+
+Deno.test("setting same object reference does not notify", () => {
+	const log: any[] = [];
+	const obj = { foo: "bar" };
+	const store = createStore(obj);
+
+	store.subscribe((v) => log.push(v));
+	assertEquals(log.length, 1); // initial call
+
+	store.set(obj); // same reference
+	assertEquals(log.length, 1); // should not notify
+
+	store.set({ foo: "bar" }); // different reference
+	assertEquals(log.length, 2); // should notify
+});
+
+Deno.test("falsy values are handled correctly", () => {
+	const store = createStore<any>(null);
+	assertEquals(store.get(), null);
+
+	store.set(undefined);
+	assertEquals(store.get(), undefined);
+
+	store.set(0);
+	assertEquals(store.get(), 0);
+
+	store.set(false);
+	assertEquals(store.get(), false);
+
+	store.set("");
+	assertEquals(store.get(), "");
+
+	store.set(NaN);
+	assert(Number.isNaN(store.get()));
+});
+
+Deno.test("memory persistor clear and remove", () => {
+	const p1 = createStoragePersistor("key1", "memory");
+	const p2 = createStoragePersistor("key2", "memory");
+
+	p1.set("value1");
+	p2.set("value2");
+
+	assertEquals(p1.get(), "value1");
+	assertEquals(p2.get(), "value2");
+
+	// Remove only key1
+	p1.remove();
+	assertEquals(p1.get(), undefined);
+	assertEquals(p2.get(), "value2");
+
+	// Clear all
+	p2.clear();
+	assertEquals(p1.get(), undefined);
+	assertEquals(p2.get(), undefined);
+});
+
+Deno.test("createStorageStore with invalid storage type", () => {
+	const originalWarn = console.warn;
+	const warnings: any[] = [];
+	console.warn = (...args: any[]) => warnings.push(args);
+
+	try {
+		const store = createStorageStore("key", "invalid" as any, "default");
+
+		assertEquals(warnings.length, 1);
+		assert(warnings[0][0].includes("Ignoring invalid storageType"));
+
+		// Should still work with fallback to session
+		assertEquals(store.get(), "default");
+	} finally {
+		console.warn = originalWarn;
+	}
+});
+
+Deno.test("invalid arguments - subscribe requires function", () => {
+	const store = createStore("foo");
+
+	assertThrows(
+		() => store.subscribe("not a function" as any),
+		TypeError,
+		"Expecting function arg",
+	);
+});
+
+Deno.test("invalid arguments - update requires function", () => {
+	const store = createStore("foo");
+
+	assertThrows(
+		() => store.update("not a function" as any),
+		TypeError,
+		"Expecting function arg",
+	);
+});
+
+Deno.test("invalid arguments - derived subscribe requires function", () => {
+	const store = createStore("foo");
+	const derived = createDerivedStore([store], ([v]) => v);
+
+	assertThrows(
+		() => derived.subscribe("not a function" as any),
+		TypeError,
+		"Expecting function arg",
+	);
+});
+
+Deno.test("invalid arguments - derived stores must be array of stores", () => {
+	assertThrows(
+		() => createDerivedStore(["not a store"] as any, () => {}),
+		TypeError,
+		"Expecting array of StoreLike objects",
+	);
+});
+
+Deno.test("invalid arguments - deriveFn must be function", () => {
+	const store = createStore("foo");
+
+	assertThrows(
+		() => createDerivedStore([store], "not a function" as any),
+		TypeError,
+		"Expecting second argument to be the derivative function",
+	);
+});
+
+Deno.test("invalid arguments - deriveFn must have 1 or 2 arguments", () => {
+	const store = createStore("foo");
+
+	assertThrows(
+		() => createDerivedStore([store], (() => {}) as any),
+		TypeError,
+		"Expecting the derivative function to have exactly 1 or 2 arguments",
+	);
+
+	assertThrows(
+		() => createDerivedStore([store], ((_a: any, _b: any, _c: any) => {}) as any),
+		TypeError,
+		"Expecting the derivative function to have exactly 1 or 2 arguments",
+	);
+});
+
+Deno.test("derived store persistence error handling", () => {
+	const errors: unknown[] = [];
+	const store = createStore("foo");
+
+	const derived = createDerivedStore(
+		[store],
+		([v]) => v.toUpperCase(),
+		{
+			persist: () => {
+				throw new Error("Derived persist failed!");
+			},
+			onPersistError: (e) => errors.push(e),
+		},
+	);
+
+	const unsub = derived.subscribe(() => {});
+
+	// Should have captured error on initial subscription
+	assert(errors.length > 0);
+	assert(errors[0] instanceof Error);
+
+	store.set("bar");
+	// Should capture error on update too
+	assert(errors.length > 1);
 
 	unsub();
 });

@@ -39,6 +39,8 @@ export interface CreateStoreOptions<T> {
 	persist?: (v: T) => void;
 	/** Optional callback to handle persistence errors */
 	onPersistError?: (error: unknown) => void;
+	/** Optional error handler for subscriber errors */
+	onError?: (error: Error) => void;
 }
 
 /**
@@ -79,7 +81,9 @@ export const createStore = <T>(
 			}
 		}
 	};
-	const _pubsub = createPubSub();
+	const _pubsub = createPubSub(
+		options?.onError ? { onError: (e) => options.onError!(e) } : undefined
+	);
 	let _value: T = initial as T;
 
 	// (maybe) persist now, even if no subscription

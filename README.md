@@ -59,3 +59,101 @@ const derivedAsync = createDerivedStore([store, store2], ([a, b], set) => {
 	}, 1000);
 });
 ```
+
+## API Reference
+
+### Types
+
+```typescript
+type Subscribe<T> = (value: T) => void;
+type Unsubscribe = () => void;
+type Update<T> = (value: T) => T;
+
+interface StoreReadable<T> {
+	subscribe(cb: Subscribe<T>): Unsubscribe;
+	get(): T;
+}
+
+interface StoreLike<T> extends StoreReadable<T> {
+	set(value: T): void;
+	update(cb: Update<T>): void;
+}
+
+interface CreateStoreOptions<T> {
+	persist?: (v: T) => void;
+	onPersistError?: (error: unknown) => void;
+}
+```
+
+### `createStore<T>(initial?, options?): StoreLike<T>`
+
+Creates a writable store with reactive subscriptions.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `initial` | `T` | Initial value of the store |
+| `options.persist` | `(v: T) => void` | Callback to persist value on change |
+| `options.onPersistError` | `(error: unknown) => void` | Error handler for persistence failures |
+
+**Returns:** `StoreLike<T>` with methods:
+- `get()` - Returns current value
+- `set(value)` - Sets new value (notifies subscribers if changed)
+- `update(fn)` - Updates value using a function
+- `subscribe(cb)` - Subscribes to changes, returns unsubscribe function
+
+---
+
+### `createDerivedStore<T>(stores, deriveFn, options?): StoreReadable<T>`
+
+Creates a derived store that computes its value from source stores.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `stores` | `StoreReadable<any>[]` | Array of source stores |
+| `deriveFn` | `(values: any[], set?) => T` | Derivation function |
+| `options.initialValue` | `any` | Initial value before first computation |
+| `options.persist` | `(v: T) => void` | Callback to persist value on change |
+| `options.onPersistError` | `(error: unknown) => void` | Error handler for persistence failures |
+
+**Returns:** `StoreReadable<T>` with methods:
+- `get()` - Returns current derived value (computes on-demand)
+- `subscribe(cb)` - Subscribes to changes, returns unsubscribe function
+
+**Note:** For async derivation, use the second `set` argument in `deriveFn`.
+
+---
+
+### `createStoragePersistor<T>(key, type?): Persistor<T>`
+
+Creates a storage adapter for persisting store values.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `key` | `string` | - | Storage key |
+| `type` | `"local" \| "session" \| "memory"` | `"session"` | Storage type |
+
+**Returns:** `Persistor<T>` with methods:
+- `get()` - Retrieve stored value
+- `set(value)` - Store a value
+- `remove()` - Remove stored value
+- `clear()` - Clear all storage
+
+---
+
+### `createStorageStore<T>(key, storageType?, initial?): StoreLike<T>`
+
+Convenience function that creates a store with automatic storage persistence.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `key` | `string` | - | Storage key |
+| `storageType` | `"local" \| "session" \| "memory"` | `"session"` | Storage type |
+| `initial` | `T` | - | Initial value if nothing in storage |
+
+**Returns:** `StoreLike<T>` - A writable store that auto-persists to storage.
+
+---
+
+### `isStoreLike(value): boolean`
+
+Checks if a value implements the store interface (duck typing).

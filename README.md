@@ -157,3 +157,10 @@ Convenience function that creates a store with automatic storage persistence.
 ### `isStoreLike(value): boolean`
 
 Checks if a value implements the store interface (duck typing).
+
+## Package Identity
+
+- **Name:** @marianmeres/store
+- **Author:** Marian Meres
+- **Repository:** https://github.com/marianmeres/store
+- **License:** MIT

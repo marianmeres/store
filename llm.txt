@@ -1,0 +1,224 @@
+# @marianmeres/store - LLM Knowledge Base
+
+## Package Identity
+
+- Name: @marianmeres/store
+- Version: 2.3.0
+- Author: Marian Meres
+- License: MIT
+- Repository: https://github.com/marianmeres/store
+- Runtime: Deno (with npm build support)
+
+## Purpose
+
+Lightweight reactive store implementation with subscriptions and persistence support.
+Svelte store contract compatible (https://svelte.dev/docs#component-format-script-4-prefix-stores-with-$-to-access-their-values-store-contract).
+
+## File Structure
+
+```
+/
+├── deno.json          # Deno configuration, package metadata, tasks
+├── deno.lock          # Dependency lock file
+├── LICENSE            # MIT License
+├── README.md          # Documentation
+├── src/
+│   ├── mod.ts         # Public API entry point (re-exports store.ts)
+│   └── store.ts       # Core implementation (~400 lines)
+├── tests/
+│   └── store.test.ts  # Comprehensive test suite (~436 lines)
+└── scripts/
+    └── build-npm.ts   # NPM package build script
+```
+
+## Dependencies
+
+### Runtime
+- @marianmeres/pubsub@^2.4.1 - Internal pub/sub for subscriptions
+
+### Dev (Deno std lib)
+- @std/assert - Testing assertions
+- @std/fs - Filesystem operations (build script)
+- @std/path - Path utilities (build script)
+
+## Exported API
+
+### Types
+
+```typescript
+type Subscribe<T> = (value: T) => void;
+type Unsubscribe = () => void;
+type Update<T> = (value: T) => T;
+
+interface StoreReadable<T> {
+    subscribe(cb: Subscribe<T>): Unsubscribe;
+    get(): T;
+}
+
+interface StoreLike<T> extends StoreReadable<T> {
+    set(value: T): void;
+    update(cb: Update<T>): void;
+}
+
+interface CreateStoreOptions<T> {
+    persist?: (v: T) => void;
+    onPersistError?: (error: unknown) => void;
+    onError?: (error: Error) => void;
+}
+
+interface CreateDerivedStoreOptions<T> extends CreateStoreOptions<T> {
+    initialValue?: any;
+}
+
+interface Persistor<T> {
+    remove: () => void;
+    set: (v: T) => void;
+    get: () => T | undefined;
+    clear: () => void;
+    __raw: () => any;
+}
+```
+
+### Functions
+
+1. `createStore<T>(initial?, options?): StoreLike<T>`
+   - Creates a writable reactive store
+   - Options: persist callback, onPersistError handler, onError handler
+   - Uses strict equality (===) for change detection
+   - Subscribers called synchronously on subscribe and on value change
+
+2. `createDerivedStore<T>(stores, deriveFn, options?): StoreReadable<T>`
+   - Creates a read-only derived store from source stores
+   - deriveFn signature: `(values: any[], set?: CallableFunction) => T`
+   - Supports sync (1 arg) and async (2 args with set callback) derivation
+   - Lazy subscription: only subscribes to sources when derived has subscribers
+   - get() triggers on-demand computation via temporary subscribe/unsubscribe
+
+3. `createStoragePersistor<T>(key, type?): Persistor<T>`
+   - Creates storage adapter for persistence
+   - Types: "local" (localStorage), "session" (sessionStorage), "memory" (Map)
+   - Default: "session"
+   - JSON serialization for storage
+
+4. `createStorageStore<T>(key, storageType?, initial?): StoreLike<T>`
+   - Convenience: combines createStore + createStoragePersistor
+   - Auto-persists on every change
+   - Restores from storage on creation
+
+5. `isStoreLike(value): boolean`
+   - Duck typing check for subscribe method presence
+
+## Implementation Details
+
+### Store Internals
+- Uses @marianmeres/pubsub for subscription management
+- Publishes on "change" topic
+- Persistence called on initial value and every set()
+- set() only notifies if value !== previous (shallow comparison)
+
+### Derived Store Internals
+- Maintains internal subscription counter
+- Subscribes to sources only when counter > 0
+- Unsubscribes from sources when counter reaches 0
+- deriveFn called once per source store on subscribe (causes duplicate calls)
+- get() without active subscription: subscribes, gets value, immediately unsubscribes
+
+### Memory Storage
+- Uses module-level Map: `_memoryStorage`
+- Shared across all memory persistors
+- clear() affects all keys
+
+## Development Commands
+
+```bash
+deno task test           # Run tests with watch mode
+deno task npm:build      # Build npm package to .npm-dist/
+deno task npm:publish    # Build and publish to npm
+```
+
+## NPM Build Process
+
+1. Copies src/ to .npm-dist/src/
+2. Copies LICENSE and README.md
+3. Generates tsconfig.json (esnext, declarations)
+4. Replaces .ts extensions with .js in imports
+5. Creates package.json from deno.json
+6. Installs @marianmeres/pubsub via npm
+7. Runs tsc
+8. Cleans up (removes tsconfig.json and src/)
+9. Final output: .npm-dist/dist/*.js + *.d.ts
+
+## Code Style
+
+- Indent: tabs
+- Line width: 90
+- Final newlines: yes
+- Trailing whitespace: trimmed
+- Lint rules: no-explicit-any excluded
+
+## Testing
+
+Tests cover:
+- Store contract compliance (Svelte compatible)
+- Subscription/unsubscription lifecycle
+- set() shallow equality check (no notification for same value)
+- update() callback pattern
+- Derived sync and async derivation
+- Derived lazy subscription behavior
+- Persistence with error handling (onPersistError + default console.warn)
+- Memory/storage persistor operations
+- Edge cases: undefined, null, falsy values, NaN
+- Type validation: function arguments required for subscribe/update/deriveFn
+- Invalid storage type fallback
+
+## Svelte Store Contract Compliance
+
+1. subscribe() accepts subscription function
+2. Subscription called immediately with current value
+3. Returns unsubscribe function
+4. All subscribers called synchronously on value change
+5. Unsubscribe stops further notifications
+
+## Version History Context
+
+- v2.3.0: Added onError support
+- v2.2.0: Previous stable
+- v2.1.0: Earlier version
+
+## Common Patterns
+
+### Basic Usage
+```typescript
+const store = createStore("initial");
+const unsub = store.subscribe(console.log);
+store.set("new value");
+store.update(v => v + " updated");
+unsub();
+```
+
+### Derived Store
+```typescript
+const a = createStore(1);
+const b = createStore(2);
+const sum = createDerivedStore([a, b], ([aVal, bVal]) => aVal + bVal);
+```
+
+### Async Derived
+```typescript
+const async = createDerivedStore([source], ([val], set) => {
+    setTimeout(() => set(val * 2), 100);
+});
+```
+
+### Persistent Store
+```typescript
+const persistor = createStoragePersistor("key", "local");
+const store = createStore(persistor.get() ?? defaultValue, {
+    persist: persistor.set
+});
+```
+
+### Convenience Persistent Store
+```typescript
+const store = createStorageStore("key", "local", defaultValue);
+```

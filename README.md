@@ -1,5 +1,8 @@
 # @marianmeres/store
 
+[![NPM version](https://img.shields.io/npm/v/@marianmeres/store.svg)](https://www.npmjs.com/package/@marianmeres/store)
+[![JSR version](https://jsr.io/badges/@marianmeres/store)](https://jsr.io/@marianmeres/store)
+
 Lightweight reactive store implementation with subscriptions and persistence support.
 [Svelte store contract](https://svelte.dev/docs#component-format-script-4-prefix-stores-with-$-to-access-their-values-store-contract)
 compatible.

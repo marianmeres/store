@@ -4,8 +4,7 @@
 [![JSR version](https://jsr.io/badges/@marianmeres/store)](https://jsr.io/@marianmeres/store)
 
 Lightweight reactive store implementation with subscriptions and persistence support.
-[Svelte store contract](https://svelte.dev/docs#component-format-script-4-prefix-stores-with-$-to-access-their-values-store-contract)
-compatible.
+Svelte store contract compatible.
 
 **Features:**
 - Reactive state management with subscriptions
@@ -24,146 +23,106 @@ deno add jsr:@marianmeres/store
 npm install @marianmeres/store
 ```
 
-## Usage
+## Quick Start
 
 ```typescript
-const store = createStore("foo");
+import { createStore, createDerivedStore } from "@marianmeres/store";
 
-// always able to `get` current value
-assert("foo" === store.get());
+// Create a writable store
+const count = createStore(0);
 
-// from now on, console.log changes
-let unsub = store.subscribe(console.log); // log: foo
+// Subscribe to changes (callback is called immediately with current value)
+const unsub = count.subscribe(val => console.log(val)); // logs: 0
 
-store.set("bar"); // logs: bar
-store.update((old) => old + "baz"); // logs: barbaz
+// Update the store
+count.set(1);              // logs: 1
+count.update(n => n + 1);  // logs: 2
 
-unsub(); // stop console.log changes for `store`
+// Get current value without subscribing
+console.log(count.get()); // 2
 
-// derived example
-const store2 = createStore(123);
-const derived = createDerivedStore([store, store2], ([a, b]) => [a, b].join());
+unsub(); // stop receiving updates
+```
 
-// derived stores compute on-demand via get() or reactively via subscribe()
-assert(derived.get() === "barbaz,123"); // computes immediately
+## Derived Stores
 
-// once subscribed, derived reactively updates when dependencies change
-unsub = derived.subscribe(console.log); // logs: barbaz,123
+Create computed values from other stores:
 
-store2.set(456); // logs: barbaz,456
+```typescript
+const firstName = createStore("John");
+const lastName = createStore("Doe");
 
-unsub();
-store.set(789); // no log (unsubscribed, so no reactive updates)
+// Synchronous derivation
+const fullName = createDerivedStore(
+  [firstName, lastName],
+  ([first, last]) => `${first} ${last}`
+);
 
-// derived async example (the deriveFn accepts second 'set' argument)
-const derivedAsync = createDerivedStore([store, store2], ([a, b], set) => {
-	setTimeout(() => {
-		set([a, b].join());
-	}, 1000);
+fullName.subscribe(console.log); // logs: "John Doe"
+firstName.set("Jane");           // logs: "Jane Doe"
+```
+
+Asynchronous derivation (use the `set` callback):
+
+```typescript
+const search = createStore("");
+const results = createDerivedStore([search], ([query], set) => {
+  // Async operation
+  fetchResults(query).then(data => set(data));
+}, { initialValue: [] });
+```
+
+## Persistence
+
+Automatically persist store values to storage:
+
+```typescript
+import { createStorageStore, createStoragePersistor, createStore } from "@marianmeres/store";
+
+// Simple: auto-persisted store
+const prefs = createStorageStore("preferences", "local", { theme: "dark" });
+prefs.set({ theme: "light" }); // automatically saved to localStorage
+
+// Advanced: manual persistor with error handling
+const persistor = createStoragePersistor<number>("counter", "local");
+const counter = createStore(persistor.get() ?? 0, {
+  persist: persistor.set,
+  onPersistError: (e) => console.error("Storage failed:", e)
 });
 ```
 
+Storage types: `"local"` (localStorage), `"session"` (sessionStorage), `"memory"` (in-memory Map).
+
 ## API Reference
+
+For complete API documentation, see [API.md](API.md).
+
+### Core Functions
+
+| Function | Description |
+|----------|-------------|
+| `createStore(initial?, options?)` | Create a writable store with `get`, `set`, `update`, `subscribe` methods. |
+| `createDerivedStore(stores, deriveFn, options?)` | Create a read-only store derived from other stores. |
+| `createStoragePersistor(key, type?)` | Create a persistence adapter for localStorage/sessionStorage/memory. |
+| `createStorageStore(key, type?, initial?)` | Convenience function for a store with automatic persistence. |
+| `isStoreLike(value)` | Type guard to check if a value implements the store interface. |
 
 ### Types
 
 ```typescript
-type Subscribe<T> = (value: T) => void;
-type Unsubscribe = () => void;
-type Update<T> = (value: T) => T;
-
 interface StoreReadable<T> {
-	subscribe(cb: Subscribe<T>): Unsubscribe;
-	get(): T;
+  subscribe(cb: (value: T) => void): () => void;
+  get(): T;
 }
 
 interface StoreLike<T> extends StoreReadable<T> {
-	set(value: T): void;
-	update(cb: Update<T>): void;
+  set(value: T): void;
+  update(cb: (value: T) => T): void;
 }
 
 interface CreateStoreOptions<T> {
-	persist?: (v: T) => void;
-	onPersistError?: (error: unknown) => void;
+  persist?: (v: T) => void;
+  onPersistError?: (error: unknown) => void;
+  onError?: (error: Error) => void;
 }
 ```
-
-### `createStore<T>(initial?, options?): StoreLike<T>`
-
-Creates a writable store with reactive subscriptions.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `initial` | `T` | Initial value of the store |
-| `options.persist` | `(v: T) => void` | Callback to persist value on change |
-| `options.onPersistError` | `(error: unknown) => void` | Error handler for persistence failures |
-
-**Returns:** `StoreLike<T>` with methods:
-- `get()` - Returns current value
-- `set(value)` - Sets new value (notifies subscribers if changed)
-- `update(fn)` - Updates value using a function
-- `subscribe(cb)` - Subscribes to changes, returns unsubscribe function
-
----
-
-### `createDerivedStore<T>(stores, deriveFn, options?): StoreReadable<T>`
-
-Creates a derived store that computes its value from source stores.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `stores` | `StoreReadable<any>[]` | Array of source stores |
-| `deriveFn` | `(values: any[], set?) => T` | Derivation function |
-| `options.initialValue` | `any` | Initial value before first computation |
-| `options.persist` | `(v: T) => void` | Callback to persist value on change |
-| `options.onPersistError` | `(error: unknown) => void` | Error handler for persistence failures |
-
-**Returns:** `StoreReadable<T>` with methods:
-- `get()` - Returns current derived value (computes on-demand)
-- `subscribe(cb)` - Subscribes to changes, returns unsubscribe function
-
-**Note:** For async derivation, use the second `set` argument in `deriveFn`.
-
----
-
-### `createStoragePersistor<T>(key, type?): Persistor<T>`
-
-Creates a storage adapter for persisting store values.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `key` | `string` | - | Storage key |
-| `type` | `"local" \| "session" \| "memory"` | `"session"` | Storage type |
-
-**Returns:** `Persistor<T>` with methods:
-- `get()` - Retrieve stored value
-- `set(value)` - Store a value
-- `remove()` - Remove stored value
-- `clear()` - Clear all storage
-
----
-
-### `createStorageStore<T>(key, storageType?, initial?): StoreLike<T>`
-
-Convenience function that creates a store with automatic storage persistence.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `key` | `string` | - | Storage key |
-| `storageType` | `"local" \| "session" \| "memory"` | `"session"` | Storage type |
-| `initial` | `T` | - | Initial value if nothing in storage |
-
-**Returns:** `StoreLike<T>` - A writable store that auto-persists to storage.
-
----
-
-### `isStoreLike(value): boolean`
-
-Checks if a value implements the store interface (duck typing).
-
-## Package Identity
-
-- **Name:** @marianmeres/store
-- **Author:** Marian Meres
-- **Repository:** https://github.com/marianmeres/store
-- **License:** MIT

@@ -1,8 +1,8 @@
 import { createPubSub } from "@marianmeres/pubsub";
 
-const isFn = (v: any) => typeof v === "function";
+const isFn = (v: unknown): v is CallableFunction => typeof v === "function";
 
-const assertFn = (v: any, prefix = "") => {
+const assertFn = (v: unknown, prefix = "") => {
 	if (!isFn(v)) throw new TypeError(`${prefix} Expecting function arg`.trim());
 };
 
@@ -31,7 +31,11 @@ export interface StoreLike<T> extends StoreReadable<T> {
  * Check whether a value implements the store interface.
  * Uses duck typing to check for the presence of a subscribe method.
  */
-export const isStoreLike = (v: any): boolean => isFn(v.subscribe);
+export const isStoreLike = (v: unknown): v is StoreReadable<unknown> =>
+	v !== null &&
+	typeof v === "object" &&
+	"subscribe" in v &&
+	isFn((v as { subscribe: unknown }).subscribe);
 
 /** Configuration options for store creation */
 export interface CreateStoreOptions<T> {
@@ -127,6 +131,7 @@ export const createStore = <T>(
 /** Configuration options for derived store creation */
 interface CreateDerivedStoreOptions<T> extends CreateStoreOptions<T> {
 	/** Initial value for the derived store before first computation */
+	// deno-lint-ignore no-explicit-any -- allows flexible initial values before T is computed
 	initialValue?: any;
 }
 
@@ -160,7 +165,9 @@ interface CreateDerivedStoreOptions<T> extends CreateStoreOptions<T> {
  * ```
  */
 export const createDerivedStore = <T>(
+	// deno-lint-ignore no-explicit-any -- allows composing stores of different types
 	stores: StoreReadable<any>[],
+	// deno-lint-ignore no-explicit-any -- matches stores array (mixed types)
 	deriveFn: (storesValues: any[], set?: CallableFunction) => T,
 	options: CreateDerivedStoreOptions<T> | null = null,
 ): StoreReadable<T> => {
@@ -178,7 +185,7 @@ export const createDerivedStore = <T>(
 		}
 	};
 	const derived = createStore<T>(options?.initialValue);
-	const _values: any[] = [];
+	const _values: unknown[] = [];
 
 	// save initial values first...
 	stores.forEach((s) => {
@@ -252,9 +259,9 @@ export const createDerivedStore = <T>(
 	// This ensures fresh values are always available, even without active subscriptions.
 	// For performance-critical code with frequent reads, maintain an active subscription instead.
 	const get = (): T => {
-		let v: any;
+		let v: T;
 		subscribe((_v) => (v = _v))(); // sub + unsub
-		return v;
+		return v!;
 	};
 
 	// omitting set (makes no sense for derived)
@@ -272,12 +279,12 @@ interface Persistor<T> {
 	/** Clear all stored values (affects entire storage) */
 	clear: () => void;
 	/** Access the underlying storage mechanism (for testing) */
-	__raw: () => any;
+	__raw: () => Storage | Map<string, unknown>;
 }
 
-const _memoryStorage = new Map<string, any>();
+const _memoryStorage = new Map<string, unknown>();
 
-const _createMemoryPersistor = <T>(key: string) => {
+const _createMemoryPersistor = <T>(key: string): Persistor<T> => {
 	// prettier-ignore
 	return {
 		remove: () => {
@@ -286,8 +293,8 @@ const _createMemoryPersistor = <T>(key: string) => {
 		set: (v: T) => {
 			_memoryStorage.set(key, v);
 		},
-		get: () => {
-			return _memoryStorage.get(key);
+		get: (): T | undefined => {
+			return _memoryStorage.get(key) as T | undefined;
 		},
 		clear: () => {
 			_memoryStorage.clear();
@@ -326,7 +333,7 @@ export const createStoragePersistor = <T>(
 	// memory special case
 	if (type === "memory") return _createMemoryPersistor(key);
 
-	const storage: any = type === "session"
+	const storage: Storage | undefined = type === "session"
 		? globalThis?.sessionStorage
 		: globalThis?.localStorage;
 	// prettier-ignore

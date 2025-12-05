@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-explicit-any -- tests use any for logging and error case testing
 import { createDerivedStore, createStoragePersistor, createStore, createStorageStore } from "../src/store.ts";
 import { assert, assertEquals, assertThrows } from "@std/assert";
 

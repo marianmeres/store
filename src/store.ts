@@ -216,23 +216,44 @@ export const createDerivedStore = <T>(
 	//
 	const _maybeInternalSubscribe = () => {
 		if (!_subsCounter++) {
+			// Flag to skip deriveFn calls during initial subscription setup.
+			// Each store's subscribe() immediately calls its callback, which would
+			// trigger deriveFn once per store. We batch these and call deriveFn once at the end.
+			let initialized = false;
+
 			// subscribe to each individually and call deriveFn with all values
 			stores.forEach((s, idx) => {
 				_internalUnsubs.push(
 					s.subscribe((value) => {
 						_values[idx] = value;
-						if (deriveFn.length === 1) {
-							derived.set(deriveFn(_values));
-							_maybePersist(derived.get());
-						} else {
-							deriveFn(_values, (v: T) => {
-								derived.set(v);
+						// Only call deriveFn after initial setup is complete
+						if (initialized) {
+							if (deriveFn.length === 1) {
+								derived.set(deriveFn(_values));
 								_maybePersist(derived.get());
-							});
+							} else {
+								deriveFn(_values, (v: T) => {
+									derived.set(v);
+									_maybePersist(derived.get());
+								});
+							}
 						}
 					}),
 				);
 			});
+
+			// Now that all stores are subscribed and _values is populated,
+			// call deriveFn exactly once with all current values
+			initialized = true;
+			if (deriveFn.length === 1) {
+				derived.set(deriveFn(_values));
+				_maybePersist(derived.get());
+			} else {
+				deriveFn(_values, (v: T) => {
+					derived.set(v);
+					_maybePersist(derived.get());
+				});
+			}
 		}
 	};
 

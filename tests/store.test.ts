@@ -101,18 +101,18 @@ Deno.test("derived works", () => {
 
 	assertEquals(derived.get(), "foo,123");
 
-	// 2 because each store triggers one call
-	assertEquals(call_log.length, 2);
-	assertEquals(call_log.join(";"), "[foo,123];[foo,123]");
+	// deriveFn is called exactly once on get() (batched, not once per source store)
+	assertEquals(call_log.length, 1);
+	assertEquals(call_log.join(";"), "[foo,123]");
 	call_log = []; // reset
 
 	// now subscribe
 	const log: any[] = [];
 	let unsub = derived.subscribe((v) => log.push(v));
 
-	// 2 because each store creates one call internal subscribtion initially
-	assertEquals(call_log.length, 2);
-	assertEquals(call_log.join(";"), "[foo,123];[foo,123]");
+	// deriveFn is called exactly once on subscribe (batched, not once per source store)
+	assertEquals(call_log.length, 1);
+	assertEquals(call_log.join(";"), "[foo,123]");
 	call_log = []; // reset
 
 	store.set("bar");
@@ -148,12 +148,58 @@ Deno.test("derived works", () => {
 	// resubscribe
 	unsub = derived.subscribe((v) => log.push(v));
 
-	//
+	// deriveFn is called exactly once on resubscribe (batched with current values)
 	assertEquals(derived.get(), "bat,789");
-	assertEquals(call_log.join(";"), "[bat,456];[bat,789]");
+	assertEquals(call_log.join(";"), "[bat,789]");
 	call_log = []; // reset
 
 	unsub();
+});
+
+Deno.test("derived calls deriveFn exactly once on initial subscribe with multiple stores", () => {
+	let callCount = 0;
+	const store1 = createStore("a");
+	const store2 = createStore("b");
+	const store3 = createStore("c");
+
+	const derived = createDerivedStore(
+		[store1, store2, store3],
+		([v1, v2, v3]) => {
+			callCount++;
+			return `${v1}-${v2}-${v3}`;
+		},
+	);
+
+	// Before subscription, deriveFn should not be called
+	assertEquals(callCount, 0);
+
+	// Subscribe - deriveFn should be called exactly once (not 3 times)
+	const unsub = derived.subscribe(() => {});
+	assertEquals(callCount, 1);
+	assertEquals(derived.get(), "a-b-c");
+
+	// Changing one store should call deriveFn once
+	store1.set("x");
+	assertEquals(callCount, 2);
+	assertEquals(derived.get(), "x-b-c");
+
+	// Changing another store should call deriveFn once more
+	store2.set("y");
+	assertEquals(callCount, 3);
+	assertEquals(derived.get(), "x-y-c");
+
+	unsub();
+
+	// After unsubscribe, changes should not call deriveFn
+	store3.set("z");
+	assertEquals(callCount, 3);
+
+	// Resubscribing should call deriveFn exactly once
+	const unsub2 = derived.subscribe(() => {});
+	assertEquals(callCount, 4);
+	assertEquals(derived.get(), "x-y-z");
+
+	unsub2();
 });
 
 Deno.test("derived undefined input", () => {

@@ -80,13 +80,13 @@ export const createStore = <T>(
 				if (options.onPersistError) {
 					options.onPersistError(e);
 				} else {
-					console.warn('Store persistence failed:', e);
+					console.warn("Store persistence failed:", e);
 				}
 			}
 		}
 	};
 	const _pubsub = createPubSub(
-		options?.onError ? { onError: (e) => options.onError!(e) } : undefined
+		options?.onError ? { onError: (e) => options.onError!(e) } : undefined,
 	);
 	let _value: T = initial as T;
 
@@ -179,7 +179,7 @@ export const createDerivedStore = <T>(
 				if (options.onPersistError) {
 					options.onPersistError(e);
 				} else {
-					console.warn('Derived store persistence failed:', e);
+					console.warn("Derived store persistence failed:", e);
 				}
 			}
 		}
@@ -354,9 +354,8 @@ export const createStoragePersistor = <T>(
 	// memory special case
 	if (type === "memory") return _createMemoryPersistor(key);
 
-	const storage: Storage | undefined = type === "session"
-		? globalThis?.sessionStorage
-		: globalThis?.localStorage;
+	const storage: Storage | undefined =
+		type === "session" ? globalThis?.sessionStorage : globalThis?.localStorage;
 	// prettier-ignore
 	return {
 		remove: () => {
@@ -368,7 +367,11 @@ export const createStoragePersistor = <T>(
 		},
 		set: (v: T) => {
 			try {
-				storage?.setItem(key, JSON.stringify(v));
+				if (v === undefined) {
+					storage?.removeItem(key);
+				} else {
+					storage?.setItem(key, JSON.stringify(v));
+				}
 			} catch (e) {
 				console.warn(`Failed to persist to storage key '${key}':`, e);
 			}

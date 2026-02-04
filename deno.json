@@ -1,6 +1,6 @@
 {
   "name": "@marianmeres/store",
-  "version": "2.4.3",
+  "version": "2.4.4",
   "exports": "./src/mod.ts",
   "tasks": {
     "test": "deno test",

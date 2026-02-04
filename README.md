@@ -2,6 +2,7 @@
 
 [![NPM version](https://img.shields.io/npm/v/@marianmeres/store.svg)](https://www.npmjs.com/package/@marianmeres/store)
 [![JSR version](https://jsr.io/badges/@marianmeres/store)](https://jsr.io/@marianmeres/store)
+[![License](https://img.shields.io/npm/l/@marianmeres/store)](LICENSE)
 
 Lightweight reactive store implementation with subscriptions and persistence support.
 Svelte store contract compatible.
@@ -93,36 +94,10 @@ const counter = createStore(persistor.get() ?? 0, {
 
 Storage types: `"local"` (localStorage), `"session"` (sessionStorage), `"memory"` (in-memory Map).
 
-## API Reference
+## API
 
-For complete API documentation, see [API.md](API.md).
+See [API.md](API.md) for complete API documentation.
 
-### Core Functions
+## License
 
-| Function | Description |
-|----------|-------------|
-| `createStore(initial?, options?)` | Create a writable store with `get`, `set`, `update`, `subscribe` methods. |
-| `createDerivedStore(stores, deriveFn, options?)` | Create a read-only store derived from other stores. |
-| `createStoragePersistor(key, type?)` | Create a persistence adapter for localStorage/sessionStorage/memory. |
-| `createStorageStore(key, type?, initial?)` | Convenience function for a store with automatic persistence. |
-| `isStoreLike(value)` | Type guard to check if a value implements the store interface. |
-
-### Types
-
-```typescript
-interface StoreReadable<T> {
-  subscribe(cb: (value: T) => void): () => void;
-  get(): T;
-}
-
-interface StoreLike<T> extends StoreReadable<T> {
-  set(value: T): void;
-  update(cb: (value: T) => T): void;
-}
-
-interface CreateStoreOptions<T> {
-  persist?: (v: T) => void;
-  onPersistError?: (error: unknown) => void;
-  onError?: (error: Error) => void;
-}
-```
+[MIT](LICENSE)

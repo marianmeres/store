@@ -1,139 +1,80 @@
-# AGENTS.md - AI Assistant Context
+# @marianmeres/store — Agent Guide
 
-Machine-readable documentation for `@marianmeres/store`.
+## Quick Reference
 
-## Package Overview
-
-- **Name**: `@marianmeres/store`
-- **Type**: Reactive state management library
+- **Stack**: TypeScript reactive state library
 - **Runtime**: Deno, Node.js, Browser
-- **Language**: TypeScript
-- **Entry Point**: `src/mod.ts` (re-exports from `src/store.ts`)
-- **Dependencies**: `@marianmeres/pubsub` (internal pub/sub mechanism)
+- **Entry point**: `src/mod.ts` (re-exports from `src/store.ts`)
+- **Dependencies**: `@marianmeres/pubsub`
+- **Test**: `deno test`
+- **Build**: `deno task npm:build`
+- **Publish**: `deno task publish`
 
-## Purpose
-
-Lightweight reactive store implementation compatible with the Svelte store contract. Provides:
-- Writable stores with `get`, `set`, `update`, `subscribe` methods
-- Derived (computed) stores from one or more source stores
-- Optional persistence to localStorage, sessionStorage, or in-memory storage
-
-## File Structure
+## Project Structure
 
 ```
 src/
   mod.ts          # Public entry point (re-exports store.ts)
   store.ts        # All implementation and types
 tests/
-  store.test.ts   # Test suite (22 tests)
+  store.test.ts   # Test suite
 scripts/
   build-npm.ts    # NPM build script
 ```
 
 ## Public API
 
-### Exported Types
-
-| Type | Purpose |
-|------|---------|
-| `Subscribe<T>` | Callback signature: `(value: T) => void` |
-| `Unsubscribe` | Return type of subscribe: `() => void` |
-| `Update<T>` | Update callback: `(value: T) => T` |
-| `StoreReadable<T>` | Interface with `subscribe` and `get` methods |
-| `StoreLike<T>` | Extends StoreReadable with `set` and `update` methods |
-| `CreateStoreOptions<T>` | Options: `persist`, `onPersistError`, `onError` |
-
-### Exported Functions
-
-| Function | Signature | Returns |
-|----------|-----------|---------|
-| `createStore` | `<T>(initial?: T, options?: CreateStoreOptions<T>)` | `StoreLike<T>` |
-| `createDerivedStore` | `<T>(stores: StoreReadable<any>[], deriveFn, options?)` | `StoreReadable<T>` |
-| `createStoragePersistor` | `<T>(key: string, type?: "session"\|"local"\|"memory")` | `Persistor<T>` |
-| `createStorageStore` | `<T>(key: string, type?, initial?: T)` | `StoreLike<T>` |
-| `isStoreLike` | `(v: unknown)` | `v is StoreReadable<unknown>` |
+| Export | Type | Purpose |
+|--------|------|---------|
+| `createStore` | Function | Create writable store with `get`, `set`, `update`, `subscribe` |
+| `createDerivedStore` | Function | Create read-only computed store from sources |
+| `createStoragePersistor` | Function | Create localStorage/sessionStorage/memory adapter |
+| `createStorageStore` | Function | Convenience: store with automatic persistence |
+| `isStoreLike` | Function | Type guard for store interface |
+| `Subscribe<T>` | Type | Callback: `(value: T) => void` |
+| `Unsubscribe` | Type | Return of subscribe: `() => void` |
+| `Update<T>` | Type | Update callback: `(value: T) => T` |
+| `StoreReadable<T>` | Interface | `subscribe` + `get` methods |
+| `StoreLike<T>` | Interface | Extends StoreReadable with `set` + `update` |
+| `CreateStoreOptions<T>` | Interface | `persist`, `onPersistError`, `onError` |
 
 ## Key Behaviors
 
 ### Store Contract (Svelte-compatible)
 1. `subscribe(cb)` calls `cb` immediately with current value
 2. `subscribe(cb)` returns an unsubscribe function
-3. `set(value)` only notifies if value changed (strict equality `===`)
+3. `set(value)` notifies only if value changed (strict equality `===`)
 4. All notifications are synchronous
 
-### Derived Store Behavior
-1. Lazy subscription: subscribes to sources only when derived has subscribers
-2. Auto-cleanup: unsubscribes from sources when all subscribers removed
-3. Sync derivation: `deriveFn(values) => T`
-4. Async derivation: `deriveFn(values, set) => void` where `set(value)` updates
-5. `get()` forces computation via temporary subscribe/unsubscribe
+### Derived Store
+1. Subscribes to sources only when derived has subscribers (lazy)
+2. Unsubscribes from sources when all subscribers removed
+3. Sync: `deriveFn(values) => T`
+4. Async: `deriveFn(values, set) => void`
+5. `get()` forces computation via temp subscribe/unsubscribe
 
 ### Persistence
-- `createStoragePersistor` creates adapter with `get/set/remove/clear/__raw`
-- Values serialized via `JSON.stringify/parse` for localStorage/sessionStorage
-- Memory storage uses `Map<string, unknown>` (not serialized)
-- Errors caught and logged to console (or custom `onPersistError` handler)
+- `createStoragePersistor` adapter: `get/set/remove/clear/__raw`
+- localStorage/sessionStorage: JSON serialized
+- Memory storage: `Map<string, unknown>` (not serialized)
+- Errors: caught and logged (or custom `onPersistError`)
 
-## Common Patterns
+## Critical Conventions
 
-### Basic Store
-```typescript
-const store = createStore<number>(0);
-store.subscribe(v => console.log(v)); // immediate: 0
-store.set(1);    // logs: 1
-store.update(n => n + 1); // logs: 2
-```
+1. Store values compared with strict equality (`===`) before notify
+2. Derived stores validate: stores must be array, deriveFn must have 1 or 2 args
+3. `subscribe` and `update` throw `TypeError` if callback not a function
+4. Persistence errors are caught—never thrown to caller
+5. Memory storage shares module-level `Map` across all memory persistors
 
-### Derived Store
-```typescript
-const a = createStore(1);
-const b = createStore(2);
-const sum = createDerivedStore([a, b], ([x, y]) => x + y);
-```
+## Before Making Changes
 
-### Persisted Store
-```typescript
-const store = createStorageStore("key", "local", defaultValue);
-// or manually:
-const p = createStoragePersistor("key", "local");
-const store = createStore(p.get() ?? default, { persist: p.set });
-```
+- [ ] Read `src/store.ts` — all implementation in one file
+- [ ] Check existing patterns for similar functionality
+- [ ] Run `deno test` before and after changes
+- [ ] Maintain Svelte store contract compatibility
+- [ ] Keep error handling consistent (catch persist errors, throw on invalid args)
 
-## Testing
+## Documentation Index
 
-```bash
-deno test              # Run tests
-deno test --watch      # Watch mode
-deno lint              # Lint check
-```
-
-## Build
-
-```bash
-deno task npm:build    # Build for NPM
-deno task npm:publish  # Build and publish to NPM
-deno publish           # Publish to JSR
-```
-
-## Implementation Notes
-
-### Internal Design
-- Uses `@marianmeres/pubsub` for subscription management
-- Internal `_memoryStorage` is a module-level `Map` shared across memory persistors
-- Derived stores track subscription count to manage source subscriptions
-
-### Type Safety
-- Generic type `T` flows through store creation
-- `createDerivedStore` uses `any` for stores array to allow mixed types
-- `isStoreLike` is a type guard returning `v is StoreReadable<unknown>`
-
-### Error Handling
-- `subscribe` and `update` validate callback is a function (throws `TypeError`)
-- `createDerivedStore` validates stores array and deriveFn arity
-- Persistence errors caught and either logged or passed to `onPersistError`
-- Subscriber errors can be handled via `onError` option (passed to pubsub)
-
-## Version History
-
-- **v2.3.x**: Added `onError` support for subscriber error handling
-- **v2.x**: Current stable API with persistence support
+- [API.md](API.md) — Complete API reference with examples

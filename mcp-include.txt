@@ -1,0 +1,1 @@
+Svelte-compatible reactive state management. Provides createStore (writable), createDerivedStore (computed/async), and optional localStorage/sessionStorage persistence via createStorageStore.

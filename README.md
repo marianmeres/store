@@ -47,13 +47,16 @@ unsub(); // stop receiving updates
 
 ## Derived Stores
 
-Create computed values from other stores:
+Create computed values from other stores. A derived store accepts either a single source store or an array of sources:
 
 ```typescript
 const firstName = createStore("John");
 const lastName = createStore("Doe");
 
-// Synchronous derivation
+// Single source
+const upper = createDerivedStore(firstName, (name) => name.toUpperCase());
+
+// Multiple sources
 const fullName = createDerivedStore(
   [firstName, lastName],
   ([first, last]) => `${first} ${last}`
@@ -63,15 +66,16 @@ fullName.subscribe(console.log); // logs: "John Doe"
 firstName.set("Jane");           // logs: "Jane Doe"
 ```
 
-Asynchronous derivation (use the `set` callback):
+Asynchronous derivation (use the `set` callback — the deriveFn must declare two explicit parameters):
 
 ```typescript
 const search = createStore("");
-const results = createDerivedStore([search], ([query], set) => {
-  // Async operation
-  fetchResults(query).then(data => set(data));
+const results = createDerivedStore<Result[]>([search], ([query], set) => {
+  fetchResults(query).then(data => set!(data));
 }, { initialValue: [] });
 ```
+
+Derived stores are **lazy**: source stores are only subscribed once the derived store itself gains a subscriber. The unsubscribe function returned by `subscribe()` is **idempotent** — safe to call multiple times.
 
 ## Persistence
 

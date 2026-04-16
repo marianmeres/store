@@ -88,7 +88,8 @@ Configuration options for store creation.
 interface CreateStoreOptions<T> {
   persist?: (v: T) => void;
   onPersistError?: (error: unknown) => void;
-  onError?: (error: Error) => void;
+  onError?: (error: Error, topic?: string, isWildcard?: boolean) => void;
+  eagerPersist?: boolean;
 }
 ```
 
@@ -96,7 +97,8 @@ interface CreateStoreOptions<T> {
 |----------|------|-------------|
 | `persist` | `(v: T) => void` | Optional callback to persist store values (e.g., to localStorage). Called on every value change. |
 | `onPersistError` | `(error: unknown) => void` | Optional callback to handle persistence errors. If not provided, errors are logged to console. |
-| `onError` | `(error: Error) => void` | Optional error handler for subscriber errors. Passed to underlying pubsub. |
+| `onError` | `(error, topic?, isWildcard?) => void` | Optional error handler for subscriber errors. Receives the underlying pubsub `topic` and `isWildcard` context. |
+| `eagerPersist` | `boolean` | Default `true`. When `false`, the initial value is **not** passed to `persist` at construction time — useful when `persist` is expensive (e.g., a network call). |
 
 ---
 
@@ -107,20 +109,27 @@ interface CreateStoreOptions<T> {
 Creates a writable store with reactive subscriptions.
 
 ```typescript
+// With initial value — store is StoreLike<T>
 function createStore<T>(
-  initial?: T,
+  initial: T,
   options?: CreateStoreOptions<T> | null
-): StoreLike<T>
+): StoreLike<T>;
+
+// Without initial value — store is StoreLike<T | undefined>
+function createStore<T>(
+  initial?: undefined,
+  options?: CreateStoreOptions<T | undefined> | null
+): StoreLike<T | undefined>;
 ```
 
 **Parameters:**
 
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
-| `initial` | `T` | `undefined` | Initial value of the store. |
+| `initial` | `T` | `undefined` | Initial value of the store. When omitted the return type widens to `StoreLike<T \| undefined>`. |
 | `options` | `CreateStoreOptions<T> \| null` | `null` | Configuration for persistence and error handling. |
 
-**Returns:** `StoreLike<T>` - A writable store with `get()`, `set()`, `update()`, and `subscribe()` methods.
+**Returns:** `StoreLike<T>` (or `StoreLike<T | undefined>` when `initial` is omitted) — a writable store with `get()`, `set()`, `update()`, and `subscribe()` methods.
 
 **Behavior:**
 - Subscriptions are called synchronously with the current value on subscribe.
@@ -161,36 +170,61 @@ const count = createStore(persistor.get() ?? 0, {
 
 ### createDerivedStore
 
-Creates a derived store that computes its value from one or more source stores.
+Creates a derived store that computes its value from a single source store or an array of source stores.
 
 ```typescript
-function createDerivedStore<T>(
-  stores: StoreReadable<any>[],
-  deriveFn: (storesValues: any[], set?: (value: T) => void) => T,
+// Single source — deriveFn receives the value directly
+function createDerivedStore<T, S = unknown>(
+  store: StoreReadable<S>,
+  deriveFn: (value: S, set?: (value: T) => void) => T | void,
   options?: CreateDerivedStoreOptions<T> | null
-): StoreReadable<T>
+): StoreReadable<T>;
+
+// Multiple sources — deriveFn receives a tuple of values, with per-source typing
+function createDerivedStore<T, S extends StoreReadable<unknown>[]>(
+  stores: [...S],
+  deriveFn: (
+    values: { [K in keyof S]: S[K] extends StoreReadable<infer V> ? V : never },
+    set?: (value: T) => void,
+  ) => T | void,
+  options?: CreateDerivedStoreOptions<T> | null
+): StoreReadable<T>;
 ```
 
 **Parameters:**
 
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
-| `stores` | `StoreReadable<any>[]` | - | Array of source stores to derive from. |
-| `deriveFn` | `(values, set?) => T` | - | Function to compute the derived value. |
+| `stores` | `StoreReadable<S>` or `StoreReadable<unknown>[]` | - | Single source store, or an array of source stores. |
+| `deriveFn` | `(value(s), set?) => T \| void` | - | Function to compute the derived value. With `length === 1` it runs synchronously and its return value is used; with `length >= 2` it runs in async mode and must call `set(value)`. |
 | `options` | `object \| null` | `null` | Configuration options. |
 | `options.initialValue` | `any` | `undefined` | Initial value before first computation. |
 | `options.persist` | `(v: T) => void` | - | Callback to persist value on change. |
 | `options.onPersistError` | `(error: unknown) => void` | - | Error handler for persistence failures. |
+| `options.eagerPersist` | `boolean` | `true` | Inherited from `CreateStoreOptions`. |
 
 **Returns:** `StoreReadable<T>` - A readable store with `get()` and `subscribe()` methods.
 
 **Behavior:**
-- Automatically subscribes to source stores only when it has active subscribers.
+- Lazy: source stores are only subscribed once the derived store itself gains its first subscriber. Construction alone does **not** subscribe to sources.
 - Unsubscribes from sources when all subscribers are removed.
-- Supports both synchronous and asynchronous derivation.
-- `get()` triggers on-demand computation by temporarily subscribing/unsubscribing.
+- Supports both synchronous and asynchronous derivation. The branch is chosen by `deriveFn.length` (matches Svelte: `> 1` → async). Default parameters do not count toward `length`, so prefer two explicit parameters for async deriveFns.
+- The unsubscribe function returned by `subscribe` is **idempotent** — calling it multiple times is safe.
+- `get()` triggers on-demand computation by temporarily subscribing/unsubscribing. For async deriveFns, `get()` returns whatever value is currently set (initially `options.initialValue`); subscribe and wait for the async result.
+- Stale async `set` calls from a previous subscribe-cycle are silently dropped — they cannot leak into the value seen by future subscribers.
 
-**Example (synchronous):**
+**Example (single source):**
+
+```typescript
+const count = createStore(3);
+const doubled = createDerivedStore(count, (n) => n * 2);
+
+console.log(doubled.get()); // 6
+count.set(5);
+console.log(doubled.get()); // 10
+```
+
+**Example (synchronous, multi-source):**
 
 ```typescript
 const a = createStore(2);
@@ -208,9 +242,9 @@ unsub();
 
 ```typescript
 const input = createStore("hello");
-const delayed = createDerivedStore([input], ([val], set) => {
+const delayed = createDerivedStore<string>([input], ([val], set) => {
   // Use the set callback for async updates
-  setTimeout(() => set(val.toUpperCase()), 100);
+  setTimeout(() => set!(val.toUpperCase()), 100);
 }, { initialValue: "" });
 
 delayed.subscribe(console.log);
@@ -227,7 +261,8 @@ Creates a storage persistence adapter for use with stores.
 ```typescript
 function createStoragePersistor<T>(
   key: string,
-  type?: "session" | "local" | "memory"
+  type?: "session" | "local" | "memory",
+  options?: { shared?: boolean }
 ): Persistor<T>
 ```
 
@@ -237,6 +272,7 @@ function createStoragePersistor<T>(
 |------|------|---------|-------------|
 | `key` | `string` | - | The storage key to use. |
 | `type` | `"session" \| "local" \| "memory"` | `"session"` | Storage type. |
+| `options.shared` | `boolean` | `true` | **Memory-only.** When `false`, the persistor uses its own private `Map` instead of the module-level shared one — useful for hermetic tests. |
 
 **Storage Types:**
 
@@ -244,7 +280,12 @@ function createStoragePersistor<T>(
 |------|-------------|
 | `"local"` | Uses `localStorage`. Persists across browser sessions. |
 | `"session"` | Uses `sessionStorage`. Persists for the current session only. |
-| `"memory"` | Uses in-memory `Map`. Clears on page reload. Useful for testing. |
+| `"memory"` | Uses in-memory `Map`. Clears on page reload. Shared across all "memory" persistors by default; pass `{ shared: false }` for an isolated `Map`. |
+
+**Notes on `set` / `get`:**
+
+- `set(undefined)` removes the key (consistent across all three storage types).
+- `get()` returns `undefined` only when the key is **not present**. A legitimately stored falsy value (`0`, `false`, `""`, `null`) is preserved on read.
 
 **Returns:** `Persistor<T>` object with methods:
 
@@ -300,7 +341,7 @@ function createStorageStore<T>(
 
 **Behavior:**
 - On creation, attempts to restore the value from storage.
-- Falls back to `initial` if nothing is found in storage.
+- Falls back to `initial` only when the key is **not present** in storage. Falsy persisted values (`0`, `false`, `""`, `null`) round-trip correctly and are not replaced by `initial`.
 - Automatically persists on every value change.
 - Invalid storage types fall back to `"session"` with a console warning.
 

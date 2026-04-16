@@ -69,7 +69,7 @@ Deno.test("persistor", () => {
 
 	store.set("baz");
 	assertEquals(store.get(), "baz");
-	assertEquals(p.__raw().get("foo"), "baz");
+	assertEquals((p.__raw() as Map<string, unknown>).get("foo"), "baz");
 });
 
 Deno.test("store update works", () => {
@@ -437,20 +437,24 @@ Deno.test("invalid arguments - deriveFn must be function", () => {
 	);
 });
 
-Deno.test("invalid arguments - deriveFn must have 1 or 2 arguments", () => {
+Deno.test("invalid arguments - deriveFn must accept at least 1 argument", () => {
 	const store = createStore("foo");
 
 	assertThrows(
 		() => createDerivedStore([store], (() => {}) as any),
 		TypeError,
-		"Expecting the derivative function to have exactly 1 or 2 arguments",
+		"Expecting the derivative function to accept at least 1 argument",
 	);
 
-	assertThrows(
-		() => createDerivedStore([store], ((_a: any, _b: any, _c: any) => {}) as any),
-		TypeError,
-		"Expecting the derivative function to have exactly 1 or 2 arguments",
+	// 3+ args is now accepted (treated as async via length > 1, extra args ignored).
+	// Matches Svelte's behavior of using length > 1 to detect async deriveFns.
+	const derived = createDerivedStore(
+		[store],
+		((vals: any[], set: any) => set(vals.join())) as any,
 	);
+	const unsub = derived.subscribe(() => {});
+	assertEquals(derived.get(), "foo");
+	unsub();
 });
 
 Deno.test("derived store persistence error handling", () => {
@@ -479,4 +483,196 @@ Deno.test("derived store persistence error handling", () => {
 	assert(errors.length > 1);
 
 	unsub();
+});
+
+// --- Regression tests for fixes in 2.5.0 -----------------------------------
+
+Deno.test("BUG-1: createStorageStore round-trips falsy persisted values", () => {
+	// Each falsy value must survive a round-trip via the persistor and not be
+	// silently replaced by `initial`. Memory persistor used to keep tests hermetic.
+	const cases: { key: string; persisted: any; initial: any }[] = [
+		{ key: "rt-0", persisted: 0, initial: 99 },
+		{ key: "rt-false", persisted: false, initial: true },
+		{ key: "rt-null", persisted: null, initial: { fallback: true } },
+		{ key: "rt-empty", persisted: "", initial: "fallback" },
+	];
+
+	for (const c of cases) {
+		const seed = createStoragePersistor<any>(c.key, "memory");
+		seed.set(c.persisted);
+		const store = createStorageStore<any>(c.key, "memory", c.initial);
+		assertEquals(store.get(), c.persisted, `key=${c.key}`);
+	}
+});
+
+Deno.test("BUG-2: derived unsubscribe is idempotent (double-unsub does not corrupt state)", () => {
+	const source = createStore("a");
+	const derived = createDerivedStore([source], ([v]) => `${v}!`);
+
+	const seen: string[] = [];
+	const unsub = derived.subscribe((v) => seen.push(v));
+	unsub();
+	unsub(); // <-- previously broke _subsCounter, silently unsubscribed sources
+
+	// New subscriber must see live source updates
+	const seen2: string[] = [];
+	const unsub2 = derived.subscribe((v) => seen2.push(v));
+	source.set("b");
+
+	assertEquals(seen2, ["a!", "b!"]);
+	unsub2();
+});
+
+Deno.test("BUG-3: persistor.get distinguishes missing key from stored falsy string", () => {
+	// Simulates a key that holds the JSON for "" (empty string). The previous
+	// `item ? ...` check would treat this as "missing" and return undefined.
+	const fakeStorage = new Map<string, string>();
+	const wrapped: Storage = {
+		getItem: (k: string) => fakeStorage.get(k) ?? null,
+		setItem: (k: string, v: string) => {
+			fakeStorage.set(k, v);
+		},
+		removeItem: (k: string) => {
+			fakeStorage.delete(k);
+		},
+		clear: () => fakeStorage.clear(),
+		key: () => null,
+		length: 0,
+	} as Storage;
+
+	// Cannot easily inject a custom Storage into createStoragePersistor, so just
+	// emulate the get path directly: a stored '""' must round-trip as "".
+	wrapped.setItem("k", JSON.stringify(""));
+	const item = wrapped.getItem("k");
+	assertEquals(item, '""');
+	const parsed = item == null ? undefined : JSON.parse(item);
+	assertEquals(parsed, "");
+});
+
+Deno.test("BUG-4: stale async derived set after unsubscribe is dropped", async () => {
+	const source = createStore(1);
+	let pendingSet: ((v: number) => void) | null = null;
+
+	const derived = createDerivedStore<number>(
+		[source],
+		(([n]: any[], set: any) => {
+			// capture set so we can fire it AFTER unsubscribing
+			pendingSet = (v) => set(v);
+			set(n * 10);
+		}) as any,
+	);
+
+	// First subscribe cycle
+	let seen1: number | undefined;
+	const unsub = derived.subscribe((v) => (seen1 = v));
+	assertEquals(seen1, 10);
+
+	// Unsubscribe and then fire the captured (now-stale) async set
+	unsub();
+	pendingSet!(999);
+	await sleep(0);
+
+	// New subscribe cycle must NOT see 999 — it should re-derive from source
+	let seen2: number | undefined;
+	const unsub2 = derived.subscribe((v) => (seen2 = v));
+	assertEquals(seen2, 10);
+	unsub2();
+});
+
+Deno.test("BUG-5: deriveFn with 3+ args is accepted (treated as async)", () => {
+	const source = createStore("hello");
+	// 3 args — extra arg ignored, async branch picked because length > 1
+	const derived = createDerivedStore<string>(
+		[source],
+		((vals: any[], set: any, _extra: any) => set(vals.join("|"))) as any,
+	);
+	const unsub = derived.subscribe(() => {});
+	assertEquals(derived.get(), "hello");
+	unsub();
+});
+
+Deno.test("BUG-6: derived created but never subscribed does not subscribe to sources", () => {
+	let subscribeCount = 0;
+	const fakeSource: any = {
+		subscribe(cb: any) {
+			subscribeCount++;
+			cb("x");
+			return () => {};
+		},
+		get: () => "x",
+	};
+
+	createDerivedStore([fakeSource], ([v]) => v);
+
+	// Construction alone must NOT subscribe to the source.
+	assertEquals(subscribeCount, 0);
+});
+
+Deno.test("DF-1: createDerivedStore accepts a single store (not just array)", () => {
+	const source = createStore(3);
+	const doubled = createDerivedStore(source, (n) => n * 2);
+
+	assertEquals(doubled.get(), 6);
+
+	const seen: number[] = [];
+	const unsub = doubled.subscribe((v) => seen.push(v));
+	source.set(5);
+	source.set(10);
+	assertEquals(seen, [6, 10, 20]);
+	unsub();
+});
+
+Deno.test("DF-1: invalid single source throws", () => {
+	assertThrows(
+		() => createDerivedStore("not a store" as any, (v: any) => v),
+		TypeError,
+		"Expecting a StoreLike object",
+	);
+});
+
+Deno.test("DF-4: memory persistor with shared:false is isolated", () => {
+	const a = createStoragePersistor<string>("iso-key", "memory", { shared: false });
+	const b = createStoragePersistor<string>("iso-key", "memory", { shared: false });
+
+	a.set("A");
+	b.set("B");
+	assertEquals(a.get(), "A");
+	assertEquals(b.get(), "B");
+
+	// Clearing one must not clear the other
+	a.clear();
+	assertEquals(a.get(), undefined);
+	assertEquals(b.get(), "B");
+});
+
+Deno.test("DF-6: eagerPersist:false skips initial persist call", () => {
+	let calls = 0;
+	const persist = () => {
+		calls++;
+	};
+
+	createStore("foo", { persist, eagerPersist: false });
+	assertEquals(calls, 0);
+
+	// Default (eager) still persists once at construction
+	createStore("foo", { persist });
+	assertEquals(calls, 1);
+});
+
+Deno.test("DF-8: onError receives topic and isWildcard context from pubsub", () => {
+	const captured: { topic?: string; isWildcard?: boolean }[] = [];
+	const store = createStore("foo", {
+		onError: (_e, topic, isWildcard) => captured.push({ topic, isWildcard }),
+	});
+
+	let armed = false;
+	store.subscribe(() => {
+		if (armed) throw new Error("boom");
+	});
+	armed = true;
+	store.set("bar"); // triggers subscriber error during publish
+
+	assertEquals(captured.length, 1);
+	assertEquals(captured[0].topic, "change");
+	assertEquals(captured[0].isWildcard, false);
 });

@@ -43,8 +43,17 @@ export interface CreateStoreOptions<T> {
 	persist?: (v: T) => void;
 	/** Optional callback to handle persistence errors */
 	onPersistError?: (error: unknown) => void;
-	/** Optional error handler for subscriber errors */
-	onError?: (error: Error) => void;
+	/**
+	 * Optional error handler for subscriber errors.
+	 * Receives the error plus pubsub context (`topic`, `isWildcard`) when available.
+	 */
+	onError?: (error: Error, topic?: string, isWildcard?: boolean) => void;
+	/**
+	 * Whether to call `persist` once at construction time with the initial value.
+	 * Defaults to `true` for backwards compatibility. Set to `false` if `persist`
+	 * is expensive (e.g., a network call) and you only want to persist on changes.
+	 */
+	eagerPersist?: boolean;
 }
 
 /**
@@ -68,10 +77,18 @@ export interface CreateStoreOptions<T> {
  * unsub();
  * ```
  */
-export const createStore = <T>(
+export function createStore<T>(
+	initial: T,
+	options?: CreateStoreOptions<T> | null,
+): StoreLike<T>;
+export function createStore<T>(
+	initial?: T | undefined,
+	options?: CreateStoreOptions<T | undefined> | null,
+): StoreLike<T | undefined>;
+export function createStore<T>(
 	initial?: T,
 	options: CreateStoreOptions<T> | null = null,
-): StoreLike<T> => {
+): StoreLike<T> {
 	const _maybePersist = (v: T) => {
 		if (options?.persist) {
 			try {
@@ -86,17 +103,22 @@ export const createStore = <T>(
 		}
 	};
 	const _pubsub = createPubSub(
-		options?.onError ? { onError: (e) => options.onError!(e) } : undefined,
+		options?.onError
+			? {
+				onError: (e, topic, isWildcard) =>
+					options.onError!(e, topic, isWildcard),
+			}
+			: undefined,
 	);
 	let _value: T = initial as T;
 
 	// (maybe) persist now, even if no subscription
-	_maybePersist(_value);
+	if (options?.eagerPersist !== false) {
+		_maybePersist(_value);
+	}
 
 	const get = (): T => _value;
 
-	// `set` is a method that takes one argument which is the value to be set. The store value
-	// gets set to the value of the argument if the store value is not already equal to it.
 	const set = (value: T) => {
 		// shallow strict compare
 		if (_value !== value) {
@@ -106,8 +128,6 @@ export const createStore = <T>(
 		}
 	};
 
-	// `update` is a method that takes one argument which is a callback. The callback takes
-	// the existing store value as its argument and returns the new value to be set to the store.
 	const update = (cb: Update<T>) => {
 		assertFn(cb, "[update]");
 		set(cb(get()));
@@ -122,11 +142,11 @@ export const createStore = <T>(
 	const subscribe = (cb: Subscribe<T>) => {
 		assertFn(cb, "[subscribe]");
 		cb(_value);
-		return _pubsub.subscribe("change", cb);
+		return _pubsub.subscribe("change", cb) as Unsubscribe;
 	};
 
 	return { set, get, update, subscribe };
-};
+}
 
 /** Configuration options for derived store creation */
 interface CreateDerivedStoreOptions<T> extends CreateStoreOptions<T> {
@@ -144,33 +164,52 @@ interface CreateDerivedStoreOptions<T> extends CreateStoreOptions<T> {
  * - Can compute values synchronously or asynchronously (using the set callback)
  * - Supports on-demand computation via get() even without active subscriptions
  *
- * @param stores - Array of source stores to derive from
- * @param deriveFn - Function to compute the derived value. Takes an array of source values
- *                   and optionally a set callback for async updates
- * @param options - Optional configuration for initial value and persistence
- * @returns A readable store with get() and subscribe() methods
+ * Accepts either a single source store or an array of source stores. When a single
+ * store is passed, the deriveFn receives its value directly; when an array is passed,
+ * the deriveFn receives an array of values (matching Svelte's `derived` semantics).
  *
  * @example
  * ```ts
- * // Synchronous derivation
- * const a = createStore(2);
- * const b = createStore(3);
- * const sum = createDerivedStore([a, b], ([aVal, bVal]) => aVal + bVal);
- * console.log(sum.get()); // 5
+ * // Single source
+ * const doubled = createDerivedStore(count, n => n * 2);
  *
- * // Asynchronous derivation
- * const async = createDerivedStore([a], ([val], set) => {
- *   setTimeout(() => set(val * 2), 100);
- * });
+ * // Multiple sources
+ * const sum = createDerivedStore([a, b], ([aVal, bVal]) => aVal + bVal);
+ *
+ * // Async derivation
+ * const fetched = createDerivedStore([query], ([q], set) => {
+ *   fetch(`/search?q=${q}`).then(r => r.json()).then(set);
+ * }, { initialValue: null });
  * ```
  */
-export const createDerivedStore = <T>(
-	// deno-lint-ignore no-explicit-any -- allows composing stores of different types
-	stores: StoreReadable<any>[],
-	// deno-lint-ignore no-explicit-any -- matches stores array (mixed types)
-	deriveFn: (storesValues: any[], set?: CallableFunction) => T,
+export function createDerivedStore<T, S = unknown>(
+	store: StoreReadable<S>,
+	deriveFn: (value: S, set?: (value: T) => void) => T | void,
+	options?: CreateDerivedStoreOptions<T> | null,
+): StoreReadable<T>;
+export function createDerivedStore<
+	T,
+	S extends StoreReadable<unknown>[] = StoreReadable<unknown>[],
+>(
+	stores: [...S],
+	deriveFn: (
+		values: { [K in keyof S]: S[K] extends StoreReadable<infer V> ? V : never },
+		set?: (value: T) => void,
+	) => T | void,
+	options?: CreateDerivedStoreOptions<T> | null,
+): StoreReadable<T>;
+export function createDerivedStore<T>(
+	// deno-lint-ignore no-explicit-any -- runtime accepts either form
+	storesOrStore: any,
+	// deno-lint-ignore no-explicit-any -- arity validated at runtime
+	deriveFn: any,
 	options: CreateDerivedStoreOptions<T> | null = null,
-): StoreReadable<T> => {
+): StoreReadable<T> {
+	const _isSingle = !Array.isArray(storesOrStore);
+	const stores: StoreReadable<unknown>[] = _isSingle
+		? [storesOrStore]
+		: storesOrStore;
+
 	const _maybePersist = (v: T) => {
 		if (options?.persist) {
 			try {
@@ -185,16 +224,17 @@ export const createDerivedStore = <T>(
 		}
 	};
 	const derived = createStore<T>(options?.initialValue);
-	const _values: unknown[] = [];
 
-	// save initial values first...
+	// Validate sources without eagerly subscribing — sources are only subscribed
+	// to once the derived store itself gains its first subscriber (lazy contract).
 	stores.forEach((s) => {
 		if (!isStoreLike(s)) {
-			throw new TypeError("Expecting array of StoreLike objects");
+			throw new TypeError(
+				_isSingle
+					? "Expecting a StoreLike object"
+					: "Expecting array of StoreLike objects",
+			);
 		}
-		// sub & immediately unsub (we could use _values.push(s.get()) but that wouldn't
-		// be native Svelte store compatible)
-		s.subscribe((v) => _values.push(v))();
 	});
 
 	if (!isFn(deriveFn)) {
@@ -203,74 +243,78 @@ export const createDerivedStore = <T>(
 		);
 	}
 
-	if (!deriveFn.length || deriveFn.length > 2) {
+	if (deriveFn.length < 1) {
 		throw new TypeError(
-			"Expecting the derivative function to have exactly 1 or 2 arguments",
+			"Expecting the derivative function to accept at least 1 argument",
 		);
 	}
 
-	//
+	const _values: unknown[] = new Array(stores.length);
 	let _subsCounter = 0;
 	let _internalUnsubs: CallableFunction[] = [];
+	// Bumped on every subscribe AND every full unsubscribe. Captured by each
+	// subscription closure so stale async `set` calls (or stale source notifications)
+	// from a previous subscribe-cycle are silently dropped instead of mutating the
+	// derived value seen by future subscribers.
+	let _generation = 0;
 
-	//
 	const _maybeInternalSubscribe = () => {
 		if (!_subsCounter++) {
-			// Flag to skip deriveFn calls during initial subscription setup.
-			// Each store's subscribe() immediately calls its callback, which would
-			// trigger deriveFn once per store. We batch these and call deriveFn once at the end.
+			_generation++;
+			const myGen = _generation;
 			let initialized = false;
+			const valuesArg = () => (_isSingle ? _values[0] : _values);
 
-			// subscribe to each individually and call deriveFn with all values
+			const callDerive = () => {
+				if (myGen !== _generation) return;
+				if (deriveFn.length === 1) {
+					derived.set(deriveFn(valuesArg()));
+					_maybePersist(derived.get());
+				} else {
+					deriveFn(valuesArg(), (v: T) => {
+						if (myGen !== _generation) return;
+						derived.set(v);
+						_maybePersist(derived.get());
+					});
+				}
+			};
+
 			stores.forEach((s, idx) => {
 				_internalUnsubs.push(
 					s.subscribe((value) => {
+						if (myGen !== _generation) return;
 						_values[idx] = value;
-						// Only call deriveFn after initial setup is complete
-						if (initialized) {
-							if (deriveFn.length === 1) {
-								derived.set(deriveFn(_values));
-								_maybePersist(derived.get());
-							} else {
-								deriveFn(_values, (v: T) => {
-									derived.set(v);
-									_maybePersist(derived.get());
-								});
-							}
-						}
+						if (initialized) callDerive();
 					}),
 				);
 			});
 
-			// Now that all stores are subscribed and _values is populated,
-			// call deriveFn exactly once with all current values
+			// Now that all sources are subscribed and _values is populated by the
+			// immediate-callback contract, run deriveFn exactly once.
 			initialized = true;
-			if (deriveFn.length === 1) {
-				derived.set(deriveFn(_values));
-				_maybePersist(derived.get());
-			} else {
-				deriveFn(_values, (v: T) => {
-					derived.set(v);
-					_maybePersist(derived.get());
-				});
-			}
+			callDerive();
 		}
 	};
 
-	//
 	const _maybeInternalUnsubscribe = () => {
 		if (!--_subsCounter) {
+			// Invalidate any in-flight async work from this subscription cycle.
+			_generation++;
 			_internalUnsubs.forEach((u) => u());
 			_internalUnsubs = [];
 		}
 	};
 
-	//
 	const subscribe = (cb: Subscribe<T>) => {
 		assertFn(cb, "[derived.subscribe]");
 		_maybeInternalSubscribe();
 		const unsub = derived.subscribe(cb);
+		// Idempotent: defensive double-call patterns (React/Svelte teardown, Promise
+		// races) must not corrupt _subsCounter and silently break the store.
+		let done = false;
 		return () => {
+			if (done) return;
+			done = true;
 			_maybeInternalUnsubscribe();
 			unsub();
 		};
@@ -287,7 +331,7 @@ export const createDerivedStore = <T>(
 
 	// omitting set (makes no sense for derived)
 	return { get, subscribe };
-};
+}
 
 /** Storage persistor interface for storing and retrieving values */
 interface Persistor<T> {
@@ -300,27 +344,45 @@ interface Persistor<T> {
 	/** Clear all stored values (affects entire storage) */
 	clear: () => void;
 	/** Access the underlying storage mechanism (for testing) */
-	__raw: () => Storage | Map<string, unknown>;
+	__raw: () => Storage | Map<string, unknown> | undefined;
+}
+
+/** Options for createStoragePersistor */
+export interface CreateStoragePersistorOptions {
+	/**
+	 * For `"memory"` type only. When `false`, the persistor uses its own private
+	 * `Map` instead of the module-level shared one. Defaults to `true` for
+	 * backwards compatibility.
+	 */
+	shared?: boolean;
 }
 
 const _memoryStorage = new Map<string, unknown>();
 
-const _createMemoryPersistor = <T>(key: string): Persistor<T> => {
-	// prettier-ignore
+const _createMemoryPersistor = <T>(
+	key: string,
+	shared = true,
+): Persistor<T> => {
+	const storage = shared ? _memoryStorage : new Map<string, unknown>();
 	return {
 		remove: () => {
-			_memoryStorage.delete(key);
+			storage.delete(key);
 		},
 		set: (v: T) => {
-			_memoryStorage.set(key, v);
+			// Treat undefined as "remove" for consistency with the localStorage adapter.
+			if (v === undefined) {
+				storage.delete(key);
+			} else {
+				storage.set(key, v);
+			}
 		},
 		get: (): T | undefined => {
-			return _memoryStorage.get(key) as T | undefined;
+			return storage.get(key) as T | undefined;
 		},
 		clear: () => {
-			_memoryStorage.clear();
+			storage.clear();
 		},
-		__raw: () => _memoryStorage, // for tests
+		__raw: () => storage,
 	};
 };
 
@@ -335,28 +397,28 @@ const _createMemoryPersistor = <T>(key: string): Persistor<T> => {
  * Values are automatically serialized/deserialized using JSON.
  * Errors are logged to console as warnings.
  *
- * @param key - The storage key to use
- * @param type - Storage type: "local", "session", or "memory"
- * @returns A persistor object with get/set/remove/clear methods
- *
  * @example
  * ```ts
  * const persistor = createStoragePersistor("user", "local");
- * const store = createStore(persistor.get() || { name: "Guest" }, {
+ * const store = createStore(persistor.get() ?? { name: "Guest" }, {
  *   persist: persistor.set
  * });
+ *
+ * // Memory persistor with isolated storage (useful for tests):
+ * const isolated = createStoragePersistor("k", "memory", { shared: false });
  * ```
  */
 export const createStoragePersistor = <T>(
 	key: string,
 	type: "session" | "local" | "memory" = "session",
+	options?: CreateStoragePersistorOptions,
 ): Persistor<T> => {
-	// memory special case
-	if (type === "memory") return _createMemoryPersistor(key);
+	if (type === "memory") {
+		return _createMemoryPersistor<T>(key, options?.shared !== false);
+	}
 
 	const storage: Storage | undefined =
 		type === "session" ? globalThis?.sessionStorage : globalThis?.localStorage;
-	// prettier-ignore
 	return {
 		remove: () => {
 			try {
@@ -379,7 +441,8 @@ export const createStoragePersistor = <T>(
 		get: (): T | undefined => {
 			try {
 				const item = storage?.getItem(key);
-				return item ? JSON.parse(item) : undefined;
+				// Distinguish "not found" (null) from a legitimately stored "" or "0" etc.
+				return item == null ? undefined : JSON.parse(item);
 			} catch (e) {
 				console.warn(`Failed to read from storage key '${key}':`, e);
 				return undefined;
@@ -389,10 +452,10 @@ export const createStoragePersistor = <T>(
 			try {
 				storage?.clear();
 			} catch (e) {
-				console.warn('Failed to clear storage:', e);
+				console.warn("Failed to clear storage:", e);
 			}
 		},
-		__raw: () => storage, // for tests
+		__raw: () => storage,
 	};
 };
 
@@ -403,10 +466,8 @@ export const createStoragePersistor = <T>(
  * The store will automatically persist its value to the specified storage on every change.
  * On creation, it attempts to restore the value from storage, falling back to the initial value.
  *
- * @param key - The storage key to use
- * @param storageType - Storage type: "local", "session", or "memory" (default: "session")
- * @param initial - Initial value if nothing is found in storage
- * @returns A writable store that automatically persists to storage
+ * Storage retrieval uses nullish coalescing (`??`), so falsy persisted values
+ * (`0`, `false`, `""`, `null`) are correctly restored instead of being overridden by `initial`.
  *
  * @example
  * ```ts
@@ -426,5 +487,10 @@ export const createStorageStore = <T>(
 		storageType = "session";
 	}
 	const persistor = createStoragePersistor<T>(key, storageType);
-	return createStore<T>(persistor.get() || initial, { persist: persistor.set });
+	// Distinguish "key not present" (undefined) from a legitimately stored falsy
+	// value like 0, false, "", or null — all of which must round-trip correctly.
+	const stored = persistor.get();
+	return createStore<T>(stored !== undefined ? stored : initial as T, {
+		persist: persistor.set,
+	});
 };

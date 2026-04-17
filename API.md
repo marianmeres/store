@@ -34,8 +34,20 @@ type Subscribe<T> = (value: T) => void;
 
 Unsubscribe function returned by `subscribe()` to stop receiving updates.
 
+Implements `Symbol.dispose` so the subscription can be tied to a block with the `using` statement (TypeScript ES2024 / explicit resource management). Calling it as a function still works and is idempotent.
+
 ```typescript
-type Unsubscribe = () => void;
+interface Unsubscribe {
+  (): void;
+  [Symbol.dispose](): void;
+}
+```
+
+```typescript
+{
+  using sub = store.subscribe(v => console.log(v));
+  // ...work...
+} // sub is automatically disposed here
 ```
 
 ### Update\<T\>
@@ -90,6 +102,7 @@ interface CreateStoreOptions<T> {
   onPersistError?: (error: unknown) => void;
   onError?: (error: Error, topic?: string, isWildcard?: boolean) => void;
   eagerPersist?: boolean;
+  equal?: (a: T, b: T) => boolean;
 }
 ```
 
@@ -97,8 +110,9 @@ interface CreateStoreOptions<T> {
 |----------|------|-------------|
 | `persist` | `(v: T) => void` | Optional callback to persist store values (e.g., to localStorage). Called on every value change. |
 | `onPersistError` | `(error: unknown) => void` | Optional callback to handle persistence errors. If not provided, errors are logged to console. |
-| `onError` | `(error, topic?, isWildcard?) => void` | Optional error handler for subscriber errors. Receives the underlying pubsub `topic` and `isWildcard` context. |
+| `onError` | `(error, topic?, isWildcard?) => void` | Optional error handler for subscriber errors. Receives the underlying pubsub `topic` and `isWildcard` context. Errors thrown from the *initial* immediate call to a subscriber are also routed here — they do **not** propagate out of `subscribe()`. |
 | `eagerPersist` | `boolean` | Default `true`. When `false`, the initial value is **not** passed to `persist` at construction time — useful when `persist` is expensive (e.g., a network call). |
+| `equal` | `(a: T, b: T) => boolean` | Custom equality used to decide whether `set`/`update` should notify subscribers. Defaults to strict equality (`===`). Useful for structural/deep comparison, e.g. `(a, b) => JSON.stringify(a) === JSON.stringify(b)`. |
 
 ---
 
@@ -134,8 +148,10 @@ function createStore<T>(
 **Behavior:**
 - Subscriptions are called synchronously with the current value on subscribe.
 - All active subscriptions are notified synchronously when the value changes.
-- Values are compared using strict equality (`===`) before notifying subscribers.
+- Values are compared using the `equal` option (default strict equality `===`) before notifying subscribers.
 - Compatible with [Svelte store contract](https://svelte.dev/docs#component-format-script-4-prefix-stores-with-$-to-access-their-values-store-contract).
+- **Re-entrant writes** (calling `set`/`update` from inside a subscriber callback) are queued and applied after the current publish finishes. Every subscriber observes the same ordered sequence of values — nested publishes cannot re-order notifications between subscribers.
+- **Initial subscriber errors** are routed through `onError` (or `console.error` if not provided) rather than propagating out of `subscribe()`, so a subscription is never silently lost due to a throwing first call.
 
 **Example:**
 
@@ -210,7 +226,11 @@ function createDerivedStore<T, S extends StoreReadable<unknown>[]>(
 - Unsubscribes from sources when all subscribers are removed.
 - Supports both synchronous and asynchronous derivation. The branch is chosen by `deriveFn.length` (matches Svelte: `> 1` → async). Default parameters do not count toward `length`, so prefer two explicit parameters for async deriveFns.
 - The unsubscribe function returned by `subscribe` is **idempotent** — calling it multiple times is safe.
-- `get()` triggers on-demand computation by temporarily subscribing/unsubscribing. For async deriveFns, `get()` returns whatever value is currently set (initially `options.initialValue`); subscribe and wait for the async result.
+- `options.onError` / `options.persist` / `options.onPersistError` / `options.equal` are forwarded to the inner writable store. In particular, `persist` is called only when the derived value actually changes (strict equality against the previous derived value, or the `equal` comparator if provided).
+- `get()` **fast path**: when there are no active subscribers AND `deriveFn` is sync AND every source exposes a `get()` method, it evaluates the deriveFn directly against `source.get()` — no temporary subscribe/unsubscribe cycle.
+- `get()` **async path**: when `deriveFn` is async and there are no active subscribers, returns the last cached value (or `options.initialValue` if never derived). Does **not** schedule a new async computation that the generation guard would just discard.
+- `get()` **fallback path**: when a source lacks `get()` (e.g., Svelte-style stores), falls back to a temporary subscribe/unsubscribe cycle for correctness.
+- Subscribe-path throws (either from the user-supplied callback's immediate call or from `deriveFn` during initial computation) **never leak internal state** — the subscription counter and source subscriptions are rolled back before the error is re-thrown (or routed through `onError`, for user-callback throws).
 - Stale async `set` calls from a previous subscribe-cycle are silently dropped — they cannot leak into the value seen by future subscribers.
 
 **Example (single source):**
@@ -262,8 +282,14 @@ Creates a storage persistence adapter for use with stores.
 function createStoragePersistor<T>(
   key: string,
   type?: "session" | "local" | "memory",
-  options?: { shared?: boolean }
+  options?: CreateStoragePersistorOptions
 ): Persistor<T>
+
+interface CreateStoragePersistorOptions {
+  shared?: boolean;
+  serialize?: (v: unknown) => string;
+  deserialize?: (s: string) => unknown;
+}
 ```
 
 **Parameters:**
@@ -273,6 +299,8 @@ function createStoragePersistor<T>(
 | `key` | `string` | - | The storage key to use. |
 | `type` | `"session" \| "local" \| "memory"` | `"session"` | Storage type. |
 | `options.shared` | `boolean` | `true` | **Memory-only.** When `false`, the persistor uses its own private `Map` instead of the module-level shared one — useful for hermetic tests. |
+| `options.serialize` | `(v: unknown) => string` | `JSON.stringify` | **local/session only.** Custom serializer. Useful for non-JSON-safe values (`Date`, `Map`, `Set`, `BigInt`) or custom schemas / encryption. Ignored for `"memory"`. |
+| `options.deserialize` | `(s: string) => unknown` | `JSON.parse` | **local/session only.** Custom deserializer — paired with `serialize`. Ignored for `"memory"`. |
 
 **Storage Types:**
 
@@ -325,8 +353,15 @@ Convenience function that creates a store with automatic storage persistence.
 function createStorageStore<T>(
   key: string,
   storageType?: "local" | "session" | "memory",
-  initial?: T
+  initial?: T,
+  options?: CreateStorageStoreOptions<T>
 ): StoreLike<T>
+
+interface CreateStorageStoreOptions<T> extends CreateStoragePersistorOptions {
+  onError?: CreateStoreOptions<T>["onError"];
+  equal?: CreateStoreOptions<T>["equal"];
+  onPersistError?: CreateStoreOptions<T>["onPersistError"];
+}
 ```
 
 **Parameters:**
@@ -336,6 +371,7 @@ function createStorageStore<T>(
 | `key` | `string` | - | The storage key to use. |
 | `storageType` | `"local" \| "session" \| "memory"` | `"session"` | Storage type. |
 | `initial` | `T` | `undefined` | Initial value if nothing is found in storage. |
+| `options` | `CreateStorageStoreOptions<T>` | - | Forwarded to `createStoragePersistor` (`shared`, `serialize`, `deserialize`) and to `createStore` (`onError`, `equal`, `onPersistError`). |
 
 **Returns:** `StoreLike<T>` - A writable store that automatically persists to storage.
 
@@ -343,6 +379,7 @@ function createStorageStore<T>(
 - On creation, attempts to restore the value from storage.
 - Falls back to `initial` only when the key is **not present** in storage. Falsy persisted values (`0`, `false`, `""`, `null`) round-trip correctly and are not replaced by `initial`.
 - Automatically persists on every value change.
+- **Skips the construction-time persist** when the value was successfully restored from storage — no redundant "write back what we just read" round-trip. The eager persist still fires when the key was absent, so `initial` is installed into storage.
 - Invalid storage types fall back to `"session"` with a console warning.
 
 **Example:**

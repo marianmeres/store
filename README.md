@@ -11,6 +11,9 @@ Svelte store contract compatible.
 - Reactive state management with subscriptions
 - Derived stores for computed values (sync and async)
 - Optional persistence to localStorage, sessionStorage, or memory
+- Custom equality (`equal`) and custom serializers for non-JSON-safe values
+- Re-entrancy-safe `set` (consistent notification ordering across subscribers)
+- `Symbol.dispose` support — subscriptions work with `using`
 - TypeScript support with full type safety
 - Zero dependencies (except pubsub)
 
@@ -98,9 +101,43 @@ const counter = createStore(persistor.get() ?? 0, {
 
 Storage types: `"local"` (localStorage), `"session"` (sessionStorage), `"memory"` (in-memory Map).
 
+Custom serializers are supported for non-JSON-safe values (`Date`, `Map`, `Set`, `BigInt`, encrypted payloads, etc.):
+
+```typescript
+const persistor = createStoragePersistor<Date>("when", "local", {
+  serialize: (v) => (v as Date).toISOString(),
+  deserialize: (s) => new Date(s),
+});
+```
+
+## Custom equality
+
+By default, `set`/`update` notify subscribers only when the new value differs by strict equality (`===`). Pass a custom `equal` comparator when you want structural comparison:
+
+```typescript
+const store = createStore({ count: 0 }, {
+  equal: (a, b) => JSON.stringify(a) === JSON.stringify(b),
+});
+store.set({ count: 0 }); // no notification — same shape
+store.set({ count: 1 }); // notifies
+```
+
+## Resource disposal (`using`)
+
+The unsubscribe function returned by `subscribe()` implements `Symbol.dispose`, so subscriptions can be tied to a block with the `using` statement (TypeScript ES2024):
+
+```typescript
+{
+  using sub = store.subscribe(v => console.log(v));
+  // ...work...
+} // sub is automatically disposed here
+```
+
+Calling the unsubscribe directly (as a function) continues to work and remains idempotent.
+
 ## API
 
-See [API.md](API.md) for complete API documentation.
+See [API.md](API.md) for complete API documentation. See [CHANGELOG.md](CHANGELOG.md) for migration notes between versions.
 
 ## License
 
